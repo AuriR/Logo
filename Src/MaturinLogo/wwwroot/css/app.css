@@ -1,0 +1,192 @@
+/* Maturin Logo - an Apple IIe phosphor terminal in the browser.
+
+   The grid is laid out in em units so one number (the screen's font-size) scales the whole
+   machine. interop.js recomputes that font-size to fit the window, exactly like a CRT that was
+   dragged to a different desk. */
+
+/* The bitmap font is self-hosted, so the app works with no network at all. VT323 is a 1:2
+   aspect terminal face, which is what makes 40 columns x 24 rows line up on a square grid. */
+@font-face {
+    font-family: 'VT323';
+    font-style: normal;
+    font-weight: 400;
+    font-display: block;
+    src: url('../fonts/vt323.woff2') format('woff2');
+}
+
+:root {
+    --bg: #050805;
+    --fg: #33ff66;
+    --fg-dim: rgba(51, 255, 102, 0.45);
+    --glow: rgba(51, 255, 102, 0.35);
+}
+
+/* Amber monitor: the same phosphor rules, a different tube. */
+html[data-theme="amber"] {
+    --fg: #ffb000;
+    --fg-dim: rgba(255, 176, 0, 0.45);
+    --glow: rgba(255, 176, 0, 0.35);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: var(--bg);
+    overflow: hidden;
+    font-family: 'VT323', monospace;
+}
+
+#app { height: 100%; }
+
+/* Blazor's error banner stays display:none unless the framework hits a fatal error. If it were
+   reachable, its <a href=".">Reload</a> link could take focus and Enter would reload the page
+   mid-program - a real bug found in the RetroWorks original. */
+#blazor-error-ui { display: none; }
+
+/* Plain HTML shown while the WASM runtime downloads; removed by index.html once Blazor paints. */
+.boot-loading {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--fg);
+    text-shadow: 0 0 6px var(--glow), 0 0 1px currentColor;
+    font-size: clamp(24px, 5vw, 48px);
+}
+
+.boot-cursor {
+    display: inline-block;
+    width: 0.5em;
+    box-shadow: inset 0 -0.12em 0 currentColor;
+    animation: ml-blink 1s steps(2, start) infinite;
+}
+
+.ml-container {
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(ellipse at center, #0a120a 0%, var(--bg) 75%);
+}
+
+/* ---- the 40x24 grid ------------------------------------------------------ */
+
+.ml-screen {
+    color: var(--fg);
+    text-shadow: 0 0 6px var(--glow), 0 0 1px currentColor;
+    user-select: none;
+    cursor: default;
+    line-height: 1;
+    position: relative;
+}
+
+.ml-row {
+    display: flex;
+    white-space: pre;
+}
+
+/* 0.5em wide per cell matches VT323's 1:2 glyph box, so text is exactly 40 cells across. */
+.ml-cell {
+    display: inline-block;
+    width: 0.5em;
+    text-align: center;
+    font-size: inherit;
+}
+
+/* Apple II text mode had no bold and no underline - the bitmap font was the only font. Those
+   attribute bits exist for data fidelity but deliberately paint nothing. */
+.a-b { /* intentionally blank */ }
+.a-u { /* intentionally blank */ }
+
+.a-dim { color: var(--fg-dim); text-shadow: none; }
+
+.a-r {
+    background: var(--fg);
+    color: var(--bg);
+    text-shadow: none;
+}
+
+/* The cursor is an inset box-shadow rather than a border: it is paint-only, so a cell never
+   changes size and no row shifts when the cursor moves. steps(2) gives the hard on/off blink
+   of a real CRT instead of a smooth fade. */
+.cursor {
+    animation: ml-blink 1s steps(2, start) infinite;
+}
+
+/* While a program runs, the cursor is solid so a child can see Logo is busy, not stuck. */
+.cursor-solid {
+    box-shadow: inset 0 -0.12em 0 currentColor;
+}
+
+@keyframes ml-blink {
+    0%, 49%   { box-shadow: inset 0 -0.12em 0 currentColor; }
+    50%, 100% { box-shadow: inset 0 -0.12em 0 transparent; }
+}
+
+/* ---- the graphics page --------------------------------------------------- */
+
+/* The turtle draws on a canvas laid over the rows Logo reserved for graphics. Pointer events
+   stay off: this machine is driven entirely from the keyboard. */
+.ml-graphics {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    display: none;
+    pointer-events: none;
+}
+
+.ml-graphics.visible { display: block; }
+
+.ml-graphics canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    image-rendering: pixelated;
+}
+
+/* ---- CRT emulation ------------------------------------------------------- */
+
+/* Screen-door and scanline overlay plus rounded glass, toggled by html.crt-on. Colours come from
+   the active phosphor variables, so it looks right in green and in amber. */
+html.crt-on .ml-screen {
+    border-radius: 20px;
+    overflow: hidden;
+    box-shadow: inset 0 0 60px rgba(0, 0, 0, 0.55);
+}
+
+html.crt-on .ml-screen::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 5;
+    border-radius: inherit;
+    background:
+        linear-gradient(rgba(0, 0, 0, 0.28) 50%, rgba(0, 0, 0, 0) 50%),
+        linear-gradient(90deg,
+            rgba(255, 0, 0, 0.06),
+            rgba(0, 255, 0, 0.02),
+            rgba(0, 0, 255, 0.06));
+    background-size: 100% 2px, 3px 100%;
+    animation: ml-scanlines 8s linear infinite;
+}
+
+@keyframes ml-scanlines {
+    0%   { background-position: 0 0, 0 0; }
+    100% { background-position: 0 -4px, 0 0; }
+}
+
+/* Room-wide vignette so the screen reads as a tube sitting in the dark. */
+.ml-container::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 60%, rgba(0, 0, 0, 0.5) 100%);
+}

@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>8-bit Sound Demo</title>
+<style>
+  body { font-family: sans-serif; text-align: center; padding-top: 50px; }
+  button { padding: 10px 20px; font-size: 16px; }
+</style>
+</head>
+<body>
+<h1>8-bit Sound Demo</h1>
+<button id="playBtn">Play 8-bit Sound</button>
+
+<script>
+/**
+ * Play an 8-bit style sound using Web Audio API
+ * @param {number} frequency - Frequency in Hz (pitch)
+ * @param {number} duration - Duration in seconds
+ */
+function play8BitSound(frequency = 440, duration = 0.5) {
+    try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+        // Create oscillator for tone
+        const oscillator = audioCtx.createOscillator();
+        oscillator.type = 'square'; // Square wave for retro sound
+        oscillator.frequency.setValueAtTime(frequency, audioCtx.currentTime);
+
+        // Create gain node for volume control
+        const gainNode = audioCtx.createGain();
+        gainNode.gain.setValueAtTime(0.2, audioCtx.currentTime); // Lower volume
+
+        // Connect nodes
+        oscillator.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+
+        // Start and stop oscillator
+        oscillator.start();
+        oscillator.stop(audioCtx.currentTime + duration);
+
+        // Clean up after sound ends
+        oscillator.onended = () => {
+            audioCtx.close();
+        };
+    } catch (err) {
+        console.error("Web Audio API error:", err);
+    }
+}
+
+// Button click handler
+document.getElementById('playBtn').addEventListener('click', () => {
+    // Example: random pitch for variation
+    const randomFreq = Math.floor(Math.random() * 800) + 200; // 200–1000 Hz
+    play8BitSound(randomFreq, 0.3);
+});
+</script>
+</body>
+</html>

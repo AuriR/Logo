@@ -1,0 +1,102 @@
+@implements IDisposable
+@using Microsoft.JSInterop
+@using MaturinLogo.Core.Screen
+@using MaturinLogo.Core.Machine
+@inject IJSRuntime JS
+
+<div class="ml-container">
+    <LogoScreen Model="_machine" Tick="_tick" />
+</div>
+
+@code {
+    private readonly LogoMachine _machine = new();
+    private DotNetObjectReference<LogoApp>? _selfRef;
+    private IJSObjectReference? _js;
+    private int _tick;
+    private bool _started;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _started) return;
+        _started = true;
+
+        _js = await JS.InvokeAsync<IJSObjectReference>("import", "./js/interop.js");
+        _selfRef = DotNetObjectReference.Create(this);
+
+        await _js.InvokeVoidAsync("initApp", _selfRef, TextScreen.Cols, TextScreen.Rows);
+        await _js.InvokeVoidAsync("initGraphics", TextScreen.Rows);
+
+        // The machine is browser-free, so every capability it needs arrives as a delegate.
+        _machine.YieldFrameFunc = async () =>
+        {
+            if (_js is not null) await _js.InvokeVoidAsync("yieldFrame");
+        };
+        _machine.ReadStoreFunc = async key => await _js!.InvokeAsync<string?>("readStore", key);
+        _machine.WriteStoreFunc = async (key, json) => await _js!.InvokeAsync<bool>("writeStore", key, json);
+        _machine.DownloadFunc = async (name, content) => await _js!.InvokeVoidAsync("downloadFile", name, content);
+        _machine.SetThemeFunc = async (theme, crt) => await _js!.InvokeVoidAsync("setTheme", theme, crt);
+        _machine.PickFileFunc = async accept => await _js!.InvokeAsync<string?>("pickFile", accept);
+        _machine.ReplayGraphicsFunc = async (items, background, textRows) =>
+            await _js!.InvokeVoidAsync("replayGraphics", items, background, textRows, TextScreen.Rows);
+        _machine.AppendGraphicsFunc = async items => await _js!.InvokeVoidAsync("appendGraphics", items);
+        _machine.SetTurtleFunc = async turtle => await _js!.InvokeVoidAsync("setTurtle", turtle);
+
+        _machine.RenderRequested += QueueRender;
+
+        // A Logo fault must reach the developer console and the screen. The handler is fire and
+        // forget by necessity - it is called from an event - so failures here are swallowed rather
+        // than thrown back into Logo's own error path.
+        _machine.ErrorReported += text =>
+        {
+            _ = SafeReportAsync(text);
+        };
+
+        // Warn the child up front if the browser will not let Logo keep their work: private-mode
+        // Safari and blocked storage both land here.
+        _machine.StorageAvailable = await _js.InvokeAsync<bool>("storageAvailable");
+
+        await _machine.StartAsync();
+        StateHasChanged();
+    }
+
+    private async Task SafeReportAsync(string text)
+    {
+        try
+        {
+            if (_js is not null) await _js.InvokeVoidAsync("reportError", text);
+        }
+        catch
+        {
+            // Interop itself failed; the console line in reportError is already gone.
+        }
+    }
+
+    /// <summary>
+    /// Coalesce repaint requests: a program that writes 40 characters fires the screen's Changed
+    /// event 40 times, and Blazor only needs the last one. Rendering happens on the sync context,
+    /// so a pending flag is enough - no lock is needed.
+    /// </summary>
+    private bool _renderPending;
+    private void QueueRender()
+    {
+        if (_renderPending) return;
+        _renderPending = true;
+        _ = InvokeAsync(async () =>
+        {
+            await Task.Yield();
+            _renderPending = false;
+            _tick++;
+            StateHasChanged();
+        });
+    }
+
+    /// <summary>Called from the browser's keydown handler with one key token.</summary>
+    [JSInvokable]
+    public void OnKey(string token) => _machine.HandleKey(token);
+
+    public void Dispose()
+    {
+        _machine.RenderRequested -= QueueRender;
+        _selfRef?.Dispose();
+    }
+}

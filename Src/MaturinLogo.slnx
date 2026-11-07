@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="MaturinLogo.Core/MaturinLogo.Core.csproj" />
+  <Project Path="MaturinLogo.Tests/MaturinLogo.Tests.csproj" />
+  <Project Path="MaturinLogo/MaturinLogo.csproj" />
+</Solution>

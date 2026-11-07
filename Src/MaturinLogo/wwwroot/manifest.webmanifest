@@ -1,0 +1,23 @@
+{
+  "name": "Maturin Logo - Apple Logo II for the web",
+  "short_name": "Maturin Logo",
+  "id": "./",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#050805",
+  "theme_color": "#050805",
+  "description": "A Logo programming environment for kids, in the style of Apple Logo II on an Apple IIe. Works with no network.",
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    },
+    {
+      "src": "icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+@using MaturinLogo.Core.Screen
+@using MaturinLogo.Core.Machine
+
+@* The 40x24 grid. The whole screen is emitted as one MarkupString and replaced wholesale on every
+   repaint, which is far cheaper than letting Blazor diff 960 spans and cannot leave a stale
+   character behind. The canvas sits over the rows Logo reserved for graphics. *@
+<div class="ml-screen" id="ml-screen">
+    <div class="ml-graphics @GraphicsClass" id="ml-graphics">
+        <canvas id="ml-canvas"></canvas>
+    </div>
+    @((MarkupString)Build())
+</div>
+
+@code {
+    [Parameter] public LogoMachine Model { get; set; } = default!;
+
+    /// <summary>Bumped on every repaint request so Blazor re-renders the grid.</summary>
+    [Parameter] public int Tick { get; set; }
+
+    /// <summary>
+    /// Whether the canvas is on screen.
+    /// </summary>
+    /// <remarks>
+    /// Two conditions, both needed:
+    /// <list type="bullet">
+    /// <item>Some rows must belong to the picture. The text window's top edge is how Logo records
+    /// that, and it is authoritative where the layout enum is not, because LOWER/TEXT/GRAPH all set
+    /// it.</item>
+    /// <item>The listener must be the screen showing. The canvas is an opaque black rectangle that
+    /// paints over whatever is in the grid, so leaving it up during the splash, the quick reference
+    /// or the editor would hide the text underneath it - those views use all 24 rows even when EASY
+    /// mode has the turtle page configured.</item>
+    /// </list>
+    /// </remarks>
+    private string GraphicsClass =>
+        Model.ScreenKind == AppScreen.Listener && Model.Screen.WindowTop > 0 ? "visible" : "";
+
+    private string Build()
+    {
+        // No caret on the splash: the whole screen is artwork there, and a blinking underscore in
+        // the middle of a turtle reads as a fault rather than as a prompt.
+        bool showCursor = Model.ScreenKind != AppScreen.Splash;
+        (int row, int col) = Model.CaretPosition();
+        return ScreenGrid.Build(Model.Screen, row, col, showCursor);
+    }
+}

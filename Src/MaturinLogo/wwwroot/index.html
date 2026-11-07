@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Maturin Logo</title>
+    <base href="/" />
+    <link rel="preload" id="webassembly" />
+    <link rel="stylesheet" href="css/app.css" />
+    <link rel="icon" type="image/png" href="favicon.png" />
+    <link href="manifest.webmanifest" rel="manifest" />
+    <link rel="apple-touch-icon" sizes="512x512" href="icon-512.png" />
+    <link rel="apple-touch-icon" sizes="192x192" href="icon-192.png" />
+    <meta name="theme-color" content="#050805" />
+    <script type="importmap"></script>
+</head>
+
+<body>
+    <div id="app">
+        <!-- Shown immediately while the WASM runtime downloads, then removed by the script below
+             as soon as Blazor paints. A child should never stare at a blank dark page. -->
+        <div class="boot-loading"><span class="boot-text">LOADING</span><span class="boot-cursor">&#160;</span></div>
+    </div>
+
+    <div id="blazor-error-ui">
+        An unhandled error has occurred.
+        <a href="." class="reload">Reload</a>
+        <span class="dismiss">&#128473;</span>
+    </div>
+    <script>
+        // Remove the static LOADING prompt on Blazor's first render.
+        (function () {
+            var app = document.getElementById('app');
+            var boot = app.querySelector('.boot-loading');
+            if (!boot) return;
+            new MutationObserver(function () {
+                boot.remove();
+                this.disconnect();
+            }).observe(app, { childList: true });
+        })();
+    </script>
+    <script src="_framework/blazor.webassembly#[.{fingerprint}].js"></script>
+    <script>navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'none' });</script>
+</body>
+
+</html>
