@@ -95,8 +95,24 @@ public sealed class LogoMachine
     private int _historyIndex = -1;
     private readonly List<string> _history = new();
 
-    /// <summary>Row the current prompt started on; the typed text is painted from there.</summary>
-    private int _anchorRow;
+    /// <summary>
+    /// The rows the draft occupies on the grid: where it starts, which column it begins at, how
+    /// much of it is shown and which of its rows are scrolled out of view. The painter owns these
+    /// rows and nothing else may write into them.
+    /// </summary>
+    /// <remarks>
+    /// Keeping the geometry as one value rather than scattered fields is what makes it movable:
+    /// when the draft has to change size or position, the machine deletes the rows it owned and
+    /// repaints it whole. Erasing cell by cell using the *new* geometry used to strand the *old*
+    /// copy on screen, which is how a draft ended up duplicated under every Alt key that prints,
+    /// and how ghosts survived a reload inside the saved transcript.
+    /// </remarks>
+    private sealed record PaintedBlock(int Anchor, int Base, int Length, int FirstRow, int VisibleRows, bool Prompted)
+    {
+        public int End => Anchor + VisibleRows - 1;
+    }
+
+    private PaintedBlock? _block;
 
     public IReadOnlyList<string> History => _history;
 
@@ -126,7 +142,8 @@ public sealed class LogoMachine
         string[] Chars,
         CellAttr[][] Attrs,
         (int Row, int Col) Cursor,
-        AppScreen ReturnTo);
+        AppScreen ReturnTo,
+        PaintedBlock? Block);
 
     private readonly Stack<StashedScreen> _overlays = new();
 
@@ -135,6 +152,16 @@ public sealed class LogoMachine
         Engine = new Engine { Host = new WasmHost(this) };
         Engine.Screen.Changed += () => RequestRender();
         Engine.LayoutChanged += () => _ = ReplayGraphicsAsync();
+
+        // When Logo scrolls the screen, everything on it - including the rows the draft owns -
+        // moves up by a row. The block has to move with it or the painter would keep clearing rows
+        // it no longer draws on.
+        Engine.Screen.Scrolled += count =>
+        {
+            if (_block is null) return;
+            PaintedBlock moved = _block with { Anchor = _block.Anchor - count };
+            _block = moved.Anchor < Screen.WindowTop ? null : moved;
+        };
     }
 
     public void RequestRender() => RenderRequested?.Invoke();
@@ -248,6 +275,7 @@ public sealed class LogoMachine
         ScreenKind = AppScreen.Listener;
         _line.Clear();
         _caret = 0;
+        _block = null;
         _historyIndex = -1;
 
         // EASY opens on the turtle page straight away: the splash already taught the child what to
@@ -281,15 +309,16 @@ public sealed class LogoMachine
 
     // ---- the listener -----------------------------------------------------------
 
-    /// <summary>Write the prompt and remember the row it started on.</summary>
+    /// <summary>
+    /// Offer a prompt for whatever is in the buffer. The "> " belongs to the draft block rather than
+    /// being written into the transcript, so it moves and is erased together with the line it
+    /// introduces - which is why this only flips the mode and lets the painter do the drawing.
+    /// </summary>
     private void Prompt()
     {
-        if (Engine.Screen.CursorCol != 0) Engine.Screen.NewLine();
-        Engine.Screen.Write("> ");
-        _anchorRow = Engine.Screen.CursorRow;
         _showPrompt = true;
         _readBaseCol = 2;
-        _paintedLength = 0;
+        PaintInput();
     }
 
     /// <summary>
@@ -299,99 +328,206 @@ public sealed class LogoMachine
     /// </summary>
     public const int MaxInputLength = 256;
 
-    /// <summary>
-    /// Column the typed line starts at. Normally 2, just after the "> " prompt. When a program is
-    /// waiting on READ there is no prompt to draw - the program's own question is on the screen -
-    /// so the line starts wherever that program left the cursor.
-    /// </summary>
-    private int LineBaseCol => _showPrompt ? 2 : _readBaseCol;
-
-    private int RowIndexOf(int index) => (LineBaseCol + index) / TextScreen.Cols;
-
-    private int ColumnOf(int index) => (LineBaseCol + index) % TextScreen.Cols;
-
-    private int RowCountFor(int length) =>
-        length == 0 ? 1 : (LineBaseCol + length - 1) / TextScreen.Cols + 1;
-
-    /// <summary>
-    /// Which row of the typed line is painted on the anchor row, and how many rows are shown. A
-    /// line longer than the text window scrolls inside the window rather than being written past
-    /// the end of the grid, which is what used to throw and kill every key after it.
-    /// </summary>
-    private int _firstRow, _visibleRows = 1, _paintedLength;
-
     /// <summary>False while a running program is asking for a line, so its prompt is not erased.</summary>
     private bool _showPrompt = true;
 
     /// <summary>Column a waiting program left the cursor at, where its answer is typed.</summary>
     private int _readBaseCol;
 
+    /// <summary>
+    /// Column the draft starts at. Normally 2, just after the "> " prompt. When a program is waiting
+    /// on READ there is no prompt to draw - the program's own question is on the screen - so the
+    /// answer starts wherever that program left the cursor.
+    /// </summary>
+    private int LineBaseCol => _showPrompt ? 2 : _readBaseCol;
+
+    private static int RowIndexOf(int index, int baseCol) => (baseCol + index) / TextScreen.Cols;
+
+    private static int ColumnOf(int index, int baseCol) => (baseCol + index) % TextScreen.Cols;
+
+    /// <summary>Rows the text covers, plus the row the caret sits on: a line that exactly fills a
+    /// row puts the caret at the start of the next one, and that row must be inside the block.</summary>
+    private static int BlockRows(int length, int caret, int baseCol) =>
+        Math.Max((baseCol + length - 1) / TextScreen.Cols + 1, RowIndexOf(caret, baseCol) + 1);
+
+    /// <summary>
+    /// The geometry the draft has at a given anchor row, inside the current window. A block taller
+    /// than the room below its anchor shows the rows around the caret, because writing past the last
+    /// row is what used to throw and deafen the keyboard for the rest of the session.
+    /// </summary>
+    private PaintedBlock BlockFor(int anchor, int length, int caret)
+    {
+        int baseCol = LineBaseCol;
+        int rows = BlockRows(length, caret, baseCol);
+        int capacity = Math.Max(1, Screen.WindowBottom - anchor + 1);
+        int shown = Math.Min(rows, capacity);
+        int firstRow = rows > shown
+            ? Math.Clamp(RowIndexOf(caret, baseCol) - shown + 1, 0, rows - shown)
+            : 0;
+
+        return new PaintedBlock(anchor, baseCol, length, firstRow, shown, _showPrompt);
+    }
+
+    /// <summary>
+    /// Paint the draft into the grid at the anchor row, wrapping across rows exactly as the Apple II
+    /// wrapped a long typed line, and scrolling the transcript up if it runs out of room.
+    /// </summary>
+    /// <remarks>
+    /// Both the block being replaced *and* the block about to be drawn are erased first. Erasing
+    /// only the new geometry is what left a draft on screen twice: the anchor moves whenever the
+    /// machine prints a line, whenever ALT-T resizes the window, and whenever an overlay closes, and
+    /// the copy at the old rows was never revisited. Those ghosts were not cosmetic - ENTER glued
+    /// them onto the next command, and ALT-S saved them into the transcript for good.
+    /// </remarks>
     private void PaintInput()
     {
         if (ScreenKind != AppScreen.Listener) return;
 
-        // Rows the text covers, plus the row the caret sits on: a line that exactly fills a row puts
-        // the caret at the start of the next one, and that row has to be inside the visible block.
-        int rows = Math.Max(RowCountFor(Math.Max(_line.Length, _paintedLength)), RowIndexOf(_caret) + 1);
+        int caret = Math.Min(_caret, _line.Length);
+        int anchor = DraftAnchor;
 
-        // ALT-T can shrink the window from under a line that was anchored above it, so pull the
-        // anchor back inside before anything is measured against it.
-        _anchorRow = Math.Clamp(_anchorRow, Screen.WindowTop, Screen.WindowBottom);
-
-        int capacity = Math.Max(1, Screen.WindowBottom - _anchorRow + 1);
-
-        // Scroll the transcript up so the whole line fits, exactly as a terminal does, but never
-        // raise the anchor past the top of the window.
-        while (_anchorRow + rows - 1 > Screen.WindowBottom && _anchorRow > Screen.WindowTop)
+        int rows = BlockRows(_line.Length, caret, LineBaseCol);
+        while (anchor + rows - 1 > Screen.WindowBottom && anchor > Screen.WindowTop)
         {
+            // The draft has outgrown the room left under its anchor. Scrolling moves the whole
+            // window up a row, and the Scrolled hook brings the block being replaced along with it.
             Screen.ScrollUp();
-            _anchorRow--;
+            anchor--;
         }
 
-        // If the line is still taller than the window - a 256 character line needs seven rows and a
-        // split screen shows four - show the rows around the caret instead of writing past the last
-        // row, which is what used to throw and deafen the keyboard for the rest of the session.
-        capacity = Math.Max(1, Screen.WindowBottom - _anchorRow + 1);
-        _firstRow = rows > capacity
-            ? Math.Clamp(RowIndexOf(_caret) - capacity + 1, 0, rows - capacity)
-            : 0;
-        _visibleRows = Math.Min(rows - _firstRow, capacity);
+        PaintedBlock next = BlockFor(anchor, _line.Length, caret);
 
-        // Erase the cells this line owns, including the tail of a longer previous paint, so deleting
-        // a character leaves no ghost and no cell outside the block is touched.
-        int eraseUntil = Math.Max(_line.Length, _paintedLength);
-        for (int i = 0; i < eraseUntil; i++)
-        {
-            if (!TryCellOf(i, out int row, out int col)) continue;
-            Screen.Chars[row, col] = ' ';
-            Screen.Attrs[row, col] = CellAttr.None;
-        }
+        EraseBlock(_block);
+        EraseBlock(next);
 
-        for (int i = 0; i < _line.Length; i++)
-        {
-            if (!TryCellOf(i, out int row, out int col)) continue;
-            Screen.Chars[row, col] = _line[i];
-        }
+        if (_showPrompt) Screen.Put(next.Anchor, 0, "> ");
+        WriteCells(next, _line.ToString());
 
-        _paintedLength = _line.Length;
+        // Park the engine's cursor just after the draft. Anything Logo writes without asking the
+        // painter first - a program run from the editor, or a file loaded with ALT-O - then lands
+        // below the line being typed instead of across it, which is what used to make the next
+        // repaint erase the output along with the block it had printed into.
+        int lastRow = next.Anchor + Math.Min(RowIndexOf(next.Length, next.Base), next.VisibleRows - 1);
+        Screen.CursorRow = Math.Clamp(lastRow, Screen.WindowTop, Screen.WindowBottom);
+        Screen.CursorCol = Math.Clamp(ColumnOf(next.Length, next.Base), 0, TextScreen.Cols - 1);
+
+        _block = next;
     }
 
     /// <summary>
-    /// The grid cell for a position in the typed line, false when that part of the line is scrolled
-    /// out of view. Every write the painter makes goes through here, which is what keeps a long line
-    /// from reaching past the last row of the window.
+    /// Blank every cell a block owns. For an answer to a program the columns before the cursor are
+    /// left alone, because those hold the question the program asked.
     /// </summary>
-    private bool TryCellOf(int index, out int row, out int col)
+    private void EraseBlock(PaintedBlock? block)
     {
-        int rowIdx = RowIndexOf(index);
-        col = ColumnOf(index);
-        row = _anchorRow + rowIdx - _firstRow;
+        if (block is null) return;
 
-        return rowIdx >= _firstRow
-            && rowIdx < _firstRow + _visibleRows
-            && row >= Screen.WindowTop && row <= Screen.WindowBottom
+        for (int r = block.Anchor; r <= block.End; r++)
+        {
+            if (r < 0 || r >= TextScreen.Rows) continue;
+            for (int c = block.Prompted ? 0 : block.Base; c < TextScreen.Cols; c++)
+            {
+                Screen.Chars[r, c] = ' ';
+                Screen.Attrs[r, c] = CellAttr.None;
+            }
+        }
+    }
+
+    private void WriteCells(PaintedBlock block, string text)
+    {
+        for (int i = 0; i < text.Length; i++)
+        {
+            if (!TryCellOf(block, i, out int row, out int col)) continue;
+            Screen.Chars[row, col] = text[i];
+        }
+    }
+
+    /// <summary>
+    /// The grid cell for a position in a block, false when that part of the line is scrolled out of
+    /// view. Every read and write the painter makes goes through here, which is what keeps a line
+    /// taller than the window from reaching past the last row of the grid.
+    /// </summary>
+    private static bool TryCellOf(PaintedBlock block, int index, out int row, out int col)
+    {
+        int rowIdx = RowIndexOf(index, block.Base);
+        col = ColumnOf(index, block.Base);
+        row = block.Anchor + rowIdx - block.FirstRow;
+
+        return rowIdx >= block.FirstRow
+            && rowIdx < block.FirstRow + block.VisibleRows
+            && row >= 0 && row < TextScreen.Rows
             && col < TextScreen.Cols;
     }
+
+    /// <summary>
+    /// Give the rows the draft owned back to the transcript, closing up the gap so the child's work
+    /// moves down to fill it. Called before anything prints and before the draft is repainted
+    /// somewhere else, so a message and the line being typed can never end up on the same row.
+    /// </summary>
+    private void ReleaseBlock()
+    {
+        if (_block is null) return;
+
+        PaintedBlock old = _block;
+        _block = null;
+
+        // While an overlay owns the grid those rows are someone else's content, and deleting them
+        // would cut a hole in the quick reference or the file list. The stash keeps the block for
+        // the way back, so dropping it here is enough.
+        if (OverlayOwnsScreen) return;
+
+        if (!_showPrompt)
+        {
+            // Answering a program: the echoed text stays where it is, because it shares its row with
+            // the question the program asked. Printing simply continues after it.
+            Screen.CursorRow = Math.Min(old.Anchor + RowIndexOf(old.Length, old.Base), Screen.WindowBottom);
+            Screen.CursorCol = ColumnOf(old.Length, old.Base);
+            return;
+        }
+
+        Screen.DeleteRows(old.Anchor, old.VisibleRows);
+        Screen.CursorRow = Math.Min(old.Anchor, Screen.WindowBottom);
+        Screen.CursorCol = 0;
+    }
+
+    /// <summary>
+    /// Turn the draft into a real line of the transcript, so it stays on screen once the block that
+    /// held it is gone. This is what ENTER does before running the command.
+    /// </summary>
+    private void CommitDraftToTranscript(string text)
+    {
+        PaintedBlock? old = _block;
+        _block = null;
+
+        if (old is not null && !_showPrompt)
+        {
+            // The answer is already painted in the right place; just drop below it.
+            Screen.CursorRow = Math.Min(old.Anchor + RowIndexOf(old.Length, old.Base), Screen.WindowBottom);
+            Screen.CursorCol = ColumnOf(old.Length, old.Base);
+            Screen.NewLine();
+            return;
+        }
+
+        // The draft's rows go away and the command is rewritten from column 0 of the row it started
+        // on. Writing at the cursor as it stands would drop the line into the middle of whatever
+        // else is on that row - the painter parks the cursor just past the draft so Logo's output
+        // cannot land on it, and that is exactly the column that used to splice the command into a
+        // message: "TEXT - THE > PRINT 101N IS TEXT".
+        int anchor = old?.Anchor ?? DraftAnchor;
+        Screen.DeleteRows(anchor, old?.VisibleRows ?? 1);
+        Screen.CursorRow = Math.Min(anchor, Screen.WindowBottom);
+        Screen.CursorCol = 0;
+
+        Screen.Write(text.Length > 0 ? "> " + text : ">");
+        Screen.NewLine();
+    }
+
+    /// <summary>
+    /// The row the draft is anchored to. While a block is on screen that is where it starts; when
+    /// there is none, the draft belongs at the row the machine's output left off on.
+    /// </summary>
+    private int DraftAnchor => _block?.Anchor
+        ?? Math.Clamp(Screen.CursorRow, Screen.WindowTop, Screen.WindowBottom);
 
     /// <summary>
     /// Where the caret sits, using the same arithmetic as PaintInput. Used to draw the blinking
@@ -402,14 +538,21 @@ public sealed class LogoMachine
         if (ScreenKind == AppScreen.Editor) return EditorCaret;
         if (ScreenKind != AppScreen.Listener) return (Screen.CursorRow, Screen.CursorCol);
 
-        int last = LineBaseCol + _caret;
-        int rowIdx = Math.Clamp(last / TextScreen.Cols, _firstRow, _firstRow + _visibleRows - 1);
-        return (_anchorRow + rowIdx - _firstRow, Math.Min(last % TextScreen.Cols, TextScreen.Cols - 1));
+        PaintedBlock block = _block ?? BlockFor(DraftAnchor, _line.Length, Math.Min(_caret, _line.Length));
+        int last = block.Base + Math.Min(_caret, block.Length);
+        int rowIdx = Math.Clamp(last / TextScreen.Cols, block.FirstRow, block.FirstRow + block.VisibleRows - 1);
+        return (Math.Min(block.Anchor + rowIdx - block.FirstRow, Screen.WindowBottom),
+                Math.Min(last % TextScreen.Cols, TextScreen.Cols - 1));
     }
 
     /// <summary>Feed one key token into the machine.</summary>
     public void HandleKey(string token)
     {
+        // Browsers report an unshifted letter as typed, so the keyboard delivers "n" where every
+        // handler below matches "N". Unit tests press the uppercase token directly, which is why
+        // only a real browser caught that ALT-L -> N made no new session and D deleted nothing.
+        if (token.Length == 1) token = token.ToUpperInvariant();
+
         switch (ScreenKind)
         {
             case AppScreen.Splash:
@@ -478,10 +621,10 @@ public sealed class LogoMachine
             case "A-C": ToggleCrt(); return true;
             case "A-I": ShowInfo(); return true;
             case "A-L": ShowSessions(); return true;
-            case "A-S": _ = SaveThenSay("SAVED " + CurrentName); return true;
+            case "A-S": _ = SaveThenSay("SAVED " + TextSessionName); return true;
             // Ctrl+S is the same save. Browsers open their own page-save dialog for it, so the key
             // has to be swallowed and given a meaning rather than left dead.
-            case "C-S": _ = SaveThenSay("SAVED " + CurrentName); return true;
+            case "C-S": _ = SaveThenSay("SAVED " + TextSessionName); return true;
             case "A-D": _ = DownloadAsync(); return true;
             case "A-O": _ = ImportAsync(); return true;
             case "A-E": OpenEditor(); return true;
@@ -494,7 +637,39 @@ public sealed class LogoMachine
     private async Task SaveThenSay(string message)
     {
         await SaveAsync();
+
+        // Never announce a save that did not happen. localStorage throws QuotaExceededError once a
+        // session's picture gets big - a few long drawings fill the few megabytes an origin is
+        // given - and the child who believes "SAVED" and closes the tab loses everything.
+        Announce(StorageAvailable ? message : "COULD NOT SAVE - NO ROOM LEFT IN THE BROWSER");
+    }
+
+    /// <summary>
+    /// Report something to the child, wherever they are looking. The listener has a transcript to
+    /// print into; the editor does not, so it uses its status line. Without this, ALT-S and ALT-D
+    /// inside the editor did their work and said nothing at all.
+    /// </summary>
+    private void Announce(string message)
+    {
+        if (ScreenKind == AppScreen.Editor)
+        {
+            _statusMessage = message;
+            _ = FlushEditorStatusAsync();
+            PaintEditor();
+            return;
+        }
+
         Say(message);
+    }
+
+    /// <summary>Clear the editor's status line once the child has had a moment to read it.</summary>
+    private async Task FlushEditorStatusAsync()
+    {
+        await Task.Delay(2500);
+        if (_statusMessage.Length == 0) return;
+
+        _statusMessage = "";
+        if (ScreenKind == AppScreen.Editor) RequestRender();
     }
 
     /// <summary>Insert one character or run one editing key over the line buffer.</summary>
@@ -565,20 +740,6 @@ public sealed class LogoMachine
         _caret = _line.Length;
     }
 
-    /// <summary>
-    /// Park the engine's cursor just past the text being typed, so anything printed next starts
-    /// below the child's line instead of writing over it.
-    /// </summary>
-    private void MoveCursorPastInput()
-    {
-        // Park on the row the line ends on, at the column just past its last character. A line
-        // taller than the window is scrolled inside the window, so the end is clamped to the last
-        // row rather than allowed to point past it.
-        int rowIdx = RowIndexOf(_line.Length);
-        Screen.CursorRow = Math.Min(_anchorRow + rowIdx, Screen.WindowBottom);
-        Screen.CursorCol = ColumnOf(_line.Length);
-    }
-
     /// <summary>Commit the typed line to the transcript and run it.</summary>
     private void SubmitLine()
     {
@@ -586,8 +747,9 @@ public sealed class LogoMachine
 
         if (AwaitingRead) { CompleteRead(text); return; }
 
-        MoveCursorPastInput();
-        Screen.NewLine();
+        // The draft becomes a line of the transcript, so the command and its output can never share
+        // a row and the line stays on screen after the block that held it is given back.
+        CommitDraftToTranscript(text);
 
         if (text.Length > 0)
         {
@@ -611,6 +773,12 @@ public sealed class LogoMachine
         IsBusy = true;
         BreakRequested = false;
         Engine.ClearBye();
+
+        // A program can be started from the editor and the session manager as well as from the
+        // prompt, and those paths leave the listener's draft block sitting on rows the program is
+        // about to print onto. Releasing them first is what stops the closing repaint from erasing
+        // the output along with the block.
+        ReleaseBlock();
         RequestRender();
 
         try
@@ -682,15 +850,17 @@ public sealed class LogoMachine
         foreach (string line in hintLines) Screen.WriteLine(line, CellAttr.Dim);
     }
 
+    /// <summary>
+    /// Print a one-line message at the listener. The draft is taken off the grid first and repainted
+    /// afterwards, which is what keeps a message from ever landing on the line being typed - and
+    /// keeps the line from being left behind in two places when the message makes it move.
+    /// </summary>
     private void Say(string text)
     {
         if (ScreenKind != AppScreen.Listener) return;
 
-        // Anything the machine prints must go below the line being typed, not on top of it.
-        MoveCursorPastInput();
-        Screen.NewLine();
+        ReleaseBlock();
         WriteWrapped(text, CellAttr.Dim);
-        Prompt();
         PaintInput();
         RequestRender();
     }
@@ -737,17 +907,15 @@ public sealed class LogoMachine
         TaskCompletionSource<string?>? tcs = _readTcs;
         _readTcs = null;
 
-        // Park the engine's cursor just past the answer that was echoed at the prompt, then drop to
-        // a new row, so whatever the program prints next starts below what the child typed instead
-        // of writing over it.
-        MoveCursorPastInput();
-        Screen.NewLine();
+        // The answer stays on the row the program's question is on, and the cursor drops below it,
+        // so whatever the program prints next starts after what the child typed rather than writing
+        // over it.
+        CommitDraftToTranscript(text ?? "");
 
         _line.Clear();
         _caret = 0;
         _showPrompt = true;
         _readBaseCol = 2;
-        _paintedLength = 0;
 
         tcs?.TrySetResult(text);
     }
@@ -757,6 +925,11 @@ public sealed class LogoMachine
     /// <summary>ALT-T: swap between the split screen and a whole screen of text.</summary>
     public void ToggleTextGraphics()
     {
+        // The draft is taken off the grid before the window changes size. Its rows would otherwise
+        // be stranded: the block was measured against the old window, and the new one has different
+        // bottom rows, so repainting alone leaves the whole previous copy sitting on screen.
+        ReleaseBlock();
+
         if (Engine.Layout == EngineLayout.FullText)
         {
             Engine.ShowLower(Engine.Mode == LogoMode.Easy ? 4 : 1);
@@ -767,7 +940,7 @@ public sealed class LogoMachine
             Engine.ShowFullText();
             Say("TEXT - THE WHOLE SCREEN IS TEXT");
         }
-        _anchorRow = Screen.CursorRow;
+
         PaintInput();
         RequestRender();
     }
@@ -985,7 +1158,8 @@ public sealed class LogoMachine
             Chars: RowTexts(),
             Attrs: CloneAttrs(),
             Cursor: (Screen.CursorRow, Screen.CursorCol),
-            ReturnTo: ScreenKind);
+            ReturnTo: ScreenKind,
+            Block: _block);
 
         _overlays.Push(stashed);
         ScreenKind = kind;
@@ -1035,7 +1209,11 @@ public sealed class LogoMachine
         }
 
         (Screen.CursorRow, Screen.CursorCol) = stashed.Cursor;
-        _anchorRow = stashed.Cursor.Row;
+
+        // The snapshot already contains the draft exactly as it was painted, so the block that
+        // describes it comes back with it. Re-deriving the anchor from the engine's cursor instead
+        // would make the painter erase a row it never drew on and eat a line of the transcript.
+        _block = stashed.Block;
     }
 
     /// <summary>
@@ -1215,16 +1393,20 @@ public sealed class LogoMachine
     /// <summary>Capture the running workspace and write the whole store back to the browser.</summary>
     public async Task SaveAsync()
     {
-        LogoSession? session = FindSession(CurrentName);
+        // In the editor this saves the file the editor was opened for, which after ALT-L -> N is not
+        // the session on screen. The alternative is a program typed in one file landing in another.
+        string name = TextSessionName;
+
+        LogoSession? session = FindSession(name);
         if (session is null)
         {
-            session = SessionStore.Create(CurrentName);
+            session = SessionStore.Create(name);
             Store.Sessions.Add(session);
         }
 
         // Capture returns a new object; copy its mutable parts onto the stored session so the
         // creation date and identity survive a save.
-        LogoSession fresh = LogoSession.Capture(Engine, CurrentName, session.Source, _history);
+        LogoSession fresh = LogoSession.Capture(Engine, name, session.Source, _history);
         session.Mode = fresh.Mode;
         session.LinesWritten = fresh.LinesWritten;
         session.Turtle = fresh.Turtle;
@@ -1263,12 +1445,19 @@ public sealed class LogoMachine
     {
         if (DownloadFunc is null) return;
         await SaveAsync();
-        LogoSession? session = FindSession(CurrentName);
+        LogoSession? session = FindSession(TextSessionName);
         if (session is null) return;
 
-        await DownloadFunc.Invoke(CurrentName, LogoSourceExporter.Export(session));
-        Say("DOWNLOADED " + CurrentName);
+        await DownloadFunc.Invoke(session.Name, LogoSourceExporter.Export(session));
+        Announce("DOWNLOADED " + session.Name);
     }
+
+    /// <summary>
+    /// The file the child's work lives in. From the listener that is the session on screen; from the
+    /// editor it is the session the editor was opened for, which may no longer be the current one.
+    /// </summary>
+    private string TextSessionName =>
+        ScreenKind == AppScreen.Editor && _editorSessionName.Length > 0 ? _editorSessionName : CurrentName;
 
     /// <summary>ALT-O: load a .logo file the child picked, then run it.</summary>
     public async Task ImportAsync()
@@ -1277,17 +1466,55 @@ public sealed class LogoMachine
         string? text = await PickFileFunc.Invoke(".logo,.txt,text/plain");
         if (string.IsNullOrWhiteSpace(text)) return;
 
-        LogoSession? session = FindSession(CurrentName);
-        if (session is not null) { session.Source = text; await SaveAsync(); }
+        LogoSession? session = FindSession(TextSessionName);
+        if (session is not null)
+        {
+            session.Source = text;
+
+            // Inside the editor the buffer is what the child sees, so a loaded program has to appear
+            // in it. Leaving the old text on screen would invite an ESC right afterwards to overwrite
+            // the file that was just loaded.
+            if (ScreenKind == AppScreen.Editor)
+            {
+                _editorLines = text.Replace("\r\n", "\n").Split('\n').ToList();
+                if (_editorLines.Count == 0) _editorLines.Add("");
+                _editorRow = 0;
+                _editorCol = 0;
+                _editorTop = 0;
+                KeepCaretVisible();
+                PaintEditor();
+            }
+
+            await SaveAsync();
+        }
+
+        // Inside the editor the loaded program belongs in the buffer, where the child can read and
+        // change it. Running it there would print over the text they are looking at, and the editor
+        // has no transcript to show for it.
+        if (ScreenKind == AppScreen.Editor)
+        {
+            Announce("LOADED PROGRAM - ALT-R RUNS IT");
+            return;
+        }
 
         await RunAsync(text);
-        Say("LOADED PROGRAM");
+        Announce("LOADED PROGRAM");
     }
 
     // ---- editor -----------------------------------------------------------------
 
     private List<string> _editorLines = new();
     private int _editorRow, _editorCol, _editorTop;
+
+    /// <summary>
+    /// The file the buffer belongs to. Captured when the editor opens, because the child can reach
+    /// the session manager from inside the editor and make or load another session - and work typed
+    /// here must still land in the file it was started in, not whatever is current afterwards.
+    /// </summary>
+    private string _editorSessionName = "";
+
+    /// <summary>One line of feedback for the editor, which has no transcript to print into.</summary>
+    private string _statusMessage = "";
 
     /// <summary>ADVANCED only: edit the session's whole source, then run it.</summary>
     public void OpenEditor()
@@ -1304,6 +1531,8 @@ public sealed class LogoMachine
 
         OpenOverlay(AppScreen.Editor);
         LogoSession? session = FindSession(CurrentName);
+        _editorSessionName = CurrentName;
+        _statusMessage = "";
         _editorLines = (session?.Source ?? "").Replace("\r\n", "\n").Split('\n').ToList();
         if (_editorLines.Count == 0) _editorLines.Add("");
         _editorRow = 0;
@@ -1320,15 +1549,28 @@ public sealed class LogoMachine
         for (int row = 0; row < visibleRows && _editorTop + row < _editorLines.Count; row++)
             Screen.PutLine(row, Fit(_editorLines[_editorTop + row]));
 
-        Screen.PutLine(TextScreen.Rows - 1, Fit("ESC SAVE   ALT-R RUN   ALT-L FILES"), CellAttr.Reverse);
+        // The last row doubles as the status line: the editor has no transcript, so an Alt key that
+        // reports something would otherwise report it nowhere at all.
+        string footer = _statusMessage.Length > 0 ? _statusMessage : "ESC SAVE   ALT-R RUN   ALT-L FILES";
+        Screen.PutLine(TextScreen.Rows - 1, Fit(footer), CellAttr.Reverse);
     }
 
     private void HandleEditorKey(string token)
     {
+        // Every action below reads the session - save, download, run, the file list. They have to
+        // see what is in the buffer now, not what was saved when the editor was opened.
+        ApplyEditor();
+
         if (TryGlobalKey(token))
         {
-            PaintEditor();
-            RequestRender();
+            // Only repaint if the key left us in the editor. ALT-L opens the file list, and
+            // repainting here drew the program straight back over it - the child saw the editor
+            // while the machine was busy handling session-manager keys.
+            if (ScreenKind == AppScreen.Editor)
+            {
+                PaintEditor();
+                RequestRender();
+            }
             return;
         }
 
@@ -1376,6 +1618,8 @@ public sealed class LogoMachine
             default:
                 if (IsPlainChar(token))
                 {
+                    // Insert, never overwrite. A child who presses LEFT to fix a word in the middle
+                    // of a line expects the rest of the line to move right, not to be eaten.
                     _editorLines[_editorRow] = current.Insert(_editorCol, token.ToUpperInvariant());
                     _editorCol++;
                 }
@@ -1390,15 +1634,33 @@ public sealed class LogoMachine
     }
 
     /// <summary>
+    /// Copy the buffer into the session it was opened for. In-memory only, because this runs on
+    /// every keystroke so that saving, downloading and the file list see the current text - a
+    /// serialize of the whole store (picture included) per character would be far too slow.
+    /// </summary>
+    private void ApplyEditor()
+    {
+        if (ScreenKind != AppScreen.Editor) return;
+
+        LogoSession? session = FindSession(_editorSessionName);
+        if (session is null)
+        {
+            // The file was deleted from under the editor. Say so on the status line rather than
+            // editing a buffer with nowhere to go.
+            _statusMessage = "THAT FILE IS GONE - ESC LEAVES THE EDITOR";
+            return;
+        }
+
+        session.Source = string.Join("\n", _editorLines);
+    }
+
+    /// <summary>
     /// Store what the child wrote. Saving here is the point of ESC: the source has to reach the
     /// browser before anything else can overwrite it.
     /// </summary>
     private void CommitEditor()
     {
-        LogoSession? session = FindSession(CurrentName);
-        if (session is null) return;
-
-        session.Source = string.Join("\n", _editorLines);
+        ApplyEditor();
         _ = SaveAsync();
     }
 
@@ -1448,10 +1710,15 @@ public sealed class LogoMachine
             // child pressed ENTER at - a program may have printed several lines since then. The
             // listener's own "> " is suppressed here: drawing it would erase the question the
             // program just asked, which is the only reason the child is being asked to type.
-            machine._anchorRow = machine.Screen.CursorRow;
+            //
+            // The listener's half-typed line is dropped as well. Without this, a draft sitting at
+            // the prompt answered the program's READ the moment ENTER was pressed, which is the
+            // opposite of what the child sees and typed.
+            machine._line.Clear();
+            machine._caret = 0;
+            machine._block = null;
             machine._readBaseCol = machine.Screen.CursorCol;
             machine._showPrompt = false;
-            machine._paintedLength = 0;
             machine.RequestRender();
             return machine._readTcs.Task;
         }

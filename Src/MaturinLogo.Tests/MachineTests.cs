@@ -25,10 +25,17 @@ public sealed class FakeBrowser
     public int ReplayCalls;
     public int YieldCount;
 
+    /// <summary>What a write to localStorage should report. Set to false to simulate QuotaExceededError.</summary>
+    public bool WriteResult = true;
+
     public void Attach(LogoMachine machine)
     {
         machine.ReadStoreFunc = _ => Task.FromResult(StoreJson);
-        machine.WriteStoreFunc = (_, json) => { StoreJson = json; return Task.FromResult(true); };
+        machine.WriteStoreFunc = (_, json) =>
+        {
+            if (WriteResult) StoreJson = json;
+            return Task.FromResult(WriteResult);
+        };
         machine.DownloadFunc = (name, content) => { Downloads.Add((name, content)); return Task.CompletedTask; };
         machine.SetThemeFunc = (theme, crt) => { Theme = theme; Crt = crt; return Task.CompletedTask; };
         machine.PickFileFunc = _ => Task.FromResult(PickResult);

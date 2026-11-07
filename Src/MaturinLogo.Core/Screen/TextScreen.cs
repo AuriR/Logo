@@ -200,6 +200,13 @@ public sealed class TextScreen
         NewLine();
     }
 
+    /// <summary>
+    /// Raised whenever the window scrolls, with the number of rows content moved up. The listener
+    /// paints the typed line itself and has to know which rows it owns, so when the engine scrolls
+    /// the screen underneath it, those rows move too.
+    /// </summary>
+    public event Action<int>? Scrolled;
+
     /// <summary>Scroll the text window up one line, keeping content on the last row.</summary>
     public void ScrollUp()
     {
@@ -215,6 +222,40 @@ public sealed class TextScreen
             Attrs[WindowBottom, c] = CellAttr.None;
         }
         CursorRow = WindowBottom;
+        Scrolled?.Invoke(1);
+        Raise();
+    }
+
+    /// <summary>
+    /// Delete whole rows from the window, pulling everything below them up. The listener paints the
+    /// line being typed into the grid, and when that line has to move - because a message printed,
+    /// or the window changed size - its old rows must go away without leaving a blank band in the
+    /// middle of the transcript.
+    /// </summary>
+    public void DeleteRows(int start, int count)
+    {
+        start = Math.Clamp(start, WindowTop, WindowBottom + 1);
+        count = Math.Clamp(count, 0, WindowBottom - start + 1);
+        if (count == 0) return;
+
+        for (int r = start; r + count <= WindowBottom; r++)
+            for (int c = 0; c < Cols; c++)
+            {
+                Chars[r, c] = Chars[r + count, c];
+                Attrs[r, c] = Attrs[r + count, c];
+            }
+
+        for (int r = WindowBottom - count + 1; r <= WindowBottom; r++)
+            for (int c = 0; c < Cols; c++)
+            {
+                Chars[r, c] = ' ';
+                Attrs[r, c] = CellAttr.None;
+            }
+
+        // Content moved up by `count`, so the cursor moves with it. If it was inside the deleted
+        // band it lands on the first row that was freed.
+        if (CursorRow >= start) CursorRow -= count;
+        CursorRow = Math.Clamp(CursorRow, WindowTop, WindowBottom);
         Raise();
     }
 
