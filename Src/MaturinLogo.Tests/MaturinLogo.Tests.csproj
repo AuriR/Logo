@@ -31,6 +31,15 @@
     <Content Include="..\..\Docs\Architecture.md" Link="Architecture.md">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <!--
+      The browser half is otherwise untestable from C#, but two of its constants are promises the
+      interpreter makes to a child: the 16 colours SETPC can pick, and the shapes SHAPE selects.
+      Linking the file lets a test compare them with Core's tables, which is what stops a colour
+      added on one side from quietly differing on the other.
+    -->
+    <Content Include="..\MaturinLogo\wwwroot\js\interop.js" Link="interop.js">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
 </Project>

@@ -26,6 +26,54 @@ A few other changes:
 
 Also, the letterboxing is bothering me. 40 column seems too small. Is there a better approach? Perhaps 80 columns? Ask me about it. This may fix a bug with Alt-I that I saw where text was being cut off.
 
-I was allowed to create a function named "SQUARE:" and I think that should only allow alphanumeric characters.
+A few bugs I found:
 
-Shape bug
+- I was allowed to create a function named "SQUARE:" and I think that should only allow alphanumeric characters.
+- SHAPE command is listed in HELP but doesn't work
+- Text is cut off in ALT-I and HELP but should wrap or be better formatted.
+- Commands in HELP should be alphabetized in each section. They're in seemingly random order now.
+- Add support for SETSPEED command to set drawing speed 25-100. Ignore speed and draw instantly if accessibility setting is set in the OS. I believe that's simple OS/CSS media query.
+- Add a settings screen to toggle settings in one place, such as CRT mode, Monitor Color, Drawing Speed, Easy/Advanced Mode.
+- When turtle spins, it should animate to its position.
+- Support more than the 6 colors. Support 16 colors. We're in 2026, it's OK...
+- Add a WHAT'S NEW option when loading the application. It should also be available from Settings screen.
+- Add About option in Settings that shows the same text as the start screen.
+
+---
+
+## Status of the bug list above — shipped in 1.1
+
+All ten are done. What each one turned out to be:
+
+| Item | What it took |
+|---|---|
+| `TO SQUARE:` accepted | `LogoReader.IsValidName` (letters, digits, underscore) enforced in `Engine.DefineProcedure` and a new `Args.Variable`. `MAKE`/`THING`/`ERASE`/`PUT`/`GET`/`REMPROP`/`LOCAL` and a procedure's input names all check it. A number is still a legal name, as Logo intends, and an old session with a punctuation name loses that one procedure on load rather than failing to load. |
+| `SHAPE` listed but broken | The engine was setting the shape correctly; `SetTurtleAsync` never put it in the JSON. Six shapes are now drawn: arrow, triangle, turtle, dot, car, ball. |
+| Text cut off in ALT-I and HELP | One `TextWrap` helper in Core, used by the reference, the dashboard, the session list and both new pages. Nothing is truncated and nothing ends in an ellipsis — a long description wraps onto an indented row. |
+| HELP not alphabetised | `QuickReference` sorts each family by name. `Tools/DocGen` already sorted the doc's tables, which is why the two disagreed. |
+| `SETSPEED` 25–100, ignore when accessibility is on | `SETSPEED`/`SPEED`/`GETSPEED`. 100 is no pause, 25 is 450 ms a frame. `prefers-reduced-motion` is read in `interop.js`, pushed into the engine, and overrides the range; the CRT scanline animation stops under the same query. |
+| Settings screen | `Alt-,` (and the `SETTINGS` command): monitor, CRT, mode, drawing speed as a slider, What's New, About. |
+| Turtle should animate | The canvas lerps position, takes the shortest arc for heading (so `RT 350` turns ten degrees rather than unwinding three hundred and fifty), and fades for `HT`/`ST`. |
+| 16 colours | `interop.js` had six and folded `SETPC 6-15` onto them with a modulo. All sixteen `ApplePalette.Hex` values are drawn now; only the six real hi-res colours keep the chromatic fringe. |
+| WHAT'S NEW on load and in Settings | A paged page, offered as `W` on the splash in bright text only when the stored version is not the running one. Reading it marks it read. |
+| About in Settings | `SplashArt` gained a non-interactive variant, so About is the same drawing as the start screen with the invitation replaced — one painter, so they cannot disagree. |
+
+## Shipped in 1.2
+
+Three more items from the list above:
+
+| Item | What it became |
+|---|---|
+| `TOOT` (Coleco ADAM SmartLOGO) | `TOOT 440` and `TOOT "A4 0.5` — hertz or a note name, length optional. A square wave on the Web Audio clock, following `8-bit Sound Code Example.htm`. Notes queue rather than block, so a tune never stops the interpreter and `ESC` still works mid-note. |
+| Fun 8-bit sounds, togglable in settings | `SETSOUND`/`SOUND` in the language and a `SOUND` row in `Alt-,`, remembered with the monitor colour. Off also silences the notes already queued. |
+| 16 colours | Went further than the palette itself: `VIEWCOLORS` (`Alt-V`) draws all sixteen with the number a child types into `SETPC`, on the canvas, where a colour can actually be shown. |
+| `VIEWSHAPES` | Not on the list — it came from the same idea one turn later. `VIEWSHAPES` (`Alt-W`) draws all six turtle shapes with the number a child types into `SHAPE`, painted by the turtle's own painter so the chart cannot promise a shape the turtle cannot wear. `Alt-V` and `Alt-W` switch between the two pictures. |
+
+`SETSH` was already covered by `SHAPE` in 1.1 — same command, Apple Logo's name for it.
+
+Still open from this list: localisation and resource files, 80 columns, demo mode, an examples
+library, additional resources, and a downloadable exception log.
+
+80 columns was left alone because the wrapping above fixes the cut-off text that made 40 look too
+small, and the grid is 40x24 everywhere — the reader, the painter, the sessions format and the
+canvas split. See §17 of Architecture.md.

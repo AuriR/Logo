@@ -45,6 +45,40 @@ public static class ScreenPrimitives
                 return Args.Done();
             });
 
+        // VIEWCOLORS is a viewer rather than a drawing: it opens over the listener and closes back
+        // onto it, exactly like the quick reference. Putting the chart in the child's own picture
+        // instead would have saved it into the session and exported it into their .logo file, so
+        // their spiral would come back with sixteen boxes painted over it.
+        t.Add("VIEWCOLORS", 0, "Show every pen colour with its number and name.", "VIEWCOLORS",
+            CommandFamily.Screen, (e, a, _) =>
+            {
+                e.RequestColors();
+                return Args.Done();
+            }, aliases: new[] { "VIEWCOLOR", "COLORS", "COLOURS" });
+
+        t.Add("SETSPEED", 1, "Choose how fast the turtle draws, from 25 (slow) to 100 (fast).", "SETSPEED 60",
+            CommandFamily.Screen, (e, a, _) =>
+            {
+                e.Speed = Args.Speed(a, 0, "SETSPEED", e.Mode);
+                return Args.Done();
+            });
+
+        // SPEED is the reporter, as it is in Apple Logo, so `PRINT SPEED` answers rather than
+        // trying to set something. GETSPEED exists because a child who learned SETSPEED guesses it.
+        t.Add("SPEED", 0, "Report how fast the turtle draws, from 25 to 100.", "PRINT SPEED",
+            CommandFamily.Screen, (e, a, _) => Args.Number(e.Speed), isReporter: true,
+            aliases: new[] { "GETSPEED" });
+
+        // SETTINGS opens the app's own settings screen. The machine notices the request after the
+        // line finishes, exactly as it does for BYE, because opening an overlay in the middle of a
+        // program would steal the screen from the drawing the child is watching.
+        t.Add("SETTINGS", 0, "Open the settings screen: monitor, CRT, mode and drawing speed.", "SETTINGS",
+            CommandFamily.System, (e, a, _) =>
+            {
+                e.RequestSettings();
+                return Args.Done();
+            });
+
         t.Add("BG", 0, "Report the graphics background colour.", "PRINT BG",
             CommandFamily.Screen, (e, a, _) => Args.Number(e.Scene.Background), isReporter: true);
 
@@ -67,8 +101,7 @@ public static class ScreenPrimitives
                 })),
             isReporter: true);
 
-        t.Add("SETCURSOR", 2, "Move the text cursor to a row and column, counting from 1.", "SETCURSOR 5 1",
-            CommandFamily.Screen, (e, a, _) =>
+        t.Add("SETCURSOR", 2, "Move the text cursor to a row and column, counting from 1.", "SETCURSOR 5 1",            CommandFamily.Screen, (e, a, _) =>
             {
                 int row = (int)Math.Round(Args.Number(a, 0, "SETCURSOR", e.Mode)) - 1;
                 int col = (int)Math.Round(Args.Number(a, 1, "SETCURSOR", e.Mode)) - 1;

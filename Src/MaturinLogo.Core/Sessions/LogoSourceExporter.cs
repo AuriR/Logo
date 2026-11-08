@@ -28,6 +28,16 @@ public static class LogoSourceExporter
             sb.AppendLine("; ---- PROCEDURES THE CHILD WROTE ----");
             foreach (var procedure in session.Procedures)
             {
+                // Same reason as the variables below: a procedure saved before names were checked
+                // can carry a name this Logo now refuses, and one bad TO would stop the rest of the
+                // file running.
+                if (!Reader.LogoReader.IsValidName(ProcedureName(procedure)))
+                {
+                    sb.AppendLine($"; SKIPPED PROCEDURE {ProcedureName(procedure)} - NOT A NAME LOGO ACCEPTS ANY MORE");
+                    sb.AppendLine();
+                    continue;
+                }
+
                 sb.AppendLine(procedure.TrimEnd());
                 sb.AppendLine();
             }
@@ -37,7 +47,17 @@ public static class LogoSourceExporter
         {
             sb.AppendLine("; ---- VARIABLES ----");
             foreach (var global in session.Globals)
+            {
+                // Names are validated now, but a session saved before that may hold one Logo would
+                // refuse to MAKE. Emitting it anyway would make the file fail to load at that line
+                // and lose everything after it, so it is noted and skipped instead.
+                if (!Reader.LogoReader.IsValidName(global.Name))
+                {
+                    sb.AppendLine($"; SKIPPED VARIABLE {global.Name} - NOT A NAME LOGO ACCEPTS ANY MORE");
+                    continue;
+                }
                 sb.AppendLine($"MAKE \"{global.Name} {global.Text}");
+            }
             sb.AppendLine();
         }
 
@@ -62,8 +82,19 @@ public static class LogoSourceExporter
         return sb.ToString();
     }
 
-    private static StringBuilder RenderDrawing(LogoSession session)
+    /// <summary>
+    /// The name a stored procedure's source text defines, which is the second word of its TO line.
+    /// Only ever used to decide whether the export can write the procedure out at all, so anything
+    /// that does not look like a definition is reported as no name and skipped.
+    /// </summary>
+    private static string ProcedureName(string source)
     {
+        string[] parts = source.TrimStart().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 2 || !parts[0].Equals("TO", StringComparison.OrdinalIgnoreCase)) return "";
+        return parts[1];
+    }
+
+    private static StringBuilder RenderDrawing(LogoSession session)    {
         var sb = new StringBuilder();
         sb.AppendLine("CS");
         if (session.Turtle.PenColor != 2) sb.AppendLine($"SETPC {session.Turtle.PenColor}");

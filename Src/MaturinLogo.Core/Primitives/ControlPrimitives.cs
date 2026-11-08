@@ -152,6 +152,8 @@ public static class ControlPrimitives
                 if (names.Kind != LogoKind.List)
                     throw new LogoException(LogoErrorCode.BadList, "LOCAL needs a list of names",
                         "Try LOCAL [TOTAL COUNT] - the names go in brackets.", subject: "LOCAL");
+                foreach (LogoValue item in names.Items)
+                    Args.Variable([item], 0, "LOCAL", e.Mode);
                 e.DeclareLocals(names.Items.Select(i => i.AsWordText()), env);
                 return LogoValue.None;
             });

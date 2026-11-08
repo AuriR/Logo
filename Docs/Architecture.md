@@ -3,7 +3,7 @@
 A Blazor WebAssembly clone of Terrapin Logo / Apple Logo II, built to teach kids programming on
 the look and feel of an Apple IIe. .NET 10, no server, works fully offline.
 
-**Current version: 1.0** — the version in `LogoInfo`, printed by `PRINT VERSION`, on the splash, and
+**Current version: 1.2** — the version in `LogoInfo`, printed by `PRINT VERSION`, on the splash, and
 on the `Alt-I` dashboard. The revision history at the bottom of this document tracks every release.
 
 ### Contents
@@ -17,16 +17,17 @@ on the `Alt-I` dashboard. The revision history at the bottom of this document tr
 | 5 | [The evaluator](#5-the-evaluator) — pull semantics, tail calls, limits, primitive table |
 | 6 | [Turtle graphics](#6-turtle-graphics) |
 | 7 | [Screen layouts](#7-screen-layouts) |
-| 8 | [Friendly errors](#8-friendly-errors) |
-| 9 | [Sessions](#9-sessions) |
-| 10 | [The splash turtle](#10-the-splash-turtle) |
-| 11 | [Offline](#11-offline) |
-| 12 | [EASY vs ADVANCED](#12-easy-vs-advanced) |
-| 13 | [Keyboard map](#13-keyboard-map) |
-| 14 | [Command reference](#14-command-reference) — every supported command |
-| 15 | [Testing](#15-testing) |
-| 16 | [Known gaps / future](#16-known-gaps--future) |
-| 17 | [Glossary](#17-glossary) |
+| 8 | [Sound](#8-sound) — `TOOT`, the pitch table, and the switch (the `VIEW*` charts are in §7) |
+| 9 | [Friendly errors](#9-friendly-errors) |
+| 10 | [Sessions](#10-sessions) |
+| 11 | [The splash turtle](#11-the-splash-turtle) |
+| 12 | [Offline](#12-offline) |
+| 13 | [EASY vs ADVANCED](#13-easy-vs-advanced) |
+| 14 | [Keyboard map](#14-keyboard-map) |
+| 15 | [Command reference](#15-command-reference) — every supported command |
+| 16 | [Testing](#16-testing) |
+| 17 | [Known gaps / future](#17-known-gaps--future) |
+| 18 | [Glossary](#18-glossary) |
 | — | [Revision history](#revision-history) |
 
 ---
@@ -39,7 +40,7 @@ on the `Alt-I` dashboard. The revision history at the bottom of this document tr
 |---|---|---|
 | `MaturinLogo.Core` | class library | The Logo language and the whole application machine. No Blazor, no JavaScript, no DOM. |
 | `MaturinLogo` | Blazor WASM | The screen: renders the grid, hosts the canvas, owns the keyboard and browser services. |
-| `MaturinLogo.Tests` | xUnit | Tests over Core, over the machine, and over this document (§15). |
+| `MaturinLogo.Tests` | xUnit | Tests over Core, over the machine, and over this document (§16). |
 
 The split is the single most important decision in the project. Everything below the picture —
 reader, evaluator, turtle, errors, sessions, key routing, even the listener's line editor — is
@@ -59,6 +60,8 @@ MaturinLogo.Core
   Machine/LogoMachine.cs        screens, key routing, listener, overlays, sessions, editor
   Machine/ScreenGrid.cs         TextScreen -> HTML
   Machine/SplashArt.cs          the start-up screen
+  Machine/LogoWhatsNew.cs       the release notes the splash offers
+  Machine/ColorChart.cs         the VIEWCOLORS swatch grid
   Interpreter/Engine.cs         the evaluator
   Reader/                       tokenizer and reader
   Primitives/                   the command table, friendly errors, quick reference
@@ -66,6 +69,10 @@ MaturinLogo.Core
   Screen/TextScreen.cs          the 40x24 cell grid
   Sessions/                     session model, localStorage format, .logo export
 ```
+
+Outside `Src/`: `Tools/DocGen` regenerates §15's tables from the primitive table, and
+`Tools/BrowserCheck` holds the three Node harnesses described in §16. Neither is in the solution, so
+`dotnet build` and `dotnet publish` never touch either one.
 
 `MaturinLogo.Core` has **no package reference to Blazor**. If that ever becomes false, the
 testability of the whole project goes with it.
@@ -129,8 +136,9 @@ Keys are routed by `LogoMachine.HandleKey` per screen, and the rules are worth s
 because they are what makes the machine feel solid:
 
 - **Splash:** any key starts Logo. `Alt-M`/`Alt-G`/`Alt-C` set mode, phosphor and CRT first, so a
-  child can choose before starting. Nothing that opens an overlay is accepted — there is no
-  transcript to go back to.
+  child can choose before starting, and `Alt-,` opens settings. A bare letter is *not* a shortcut
+  here — `W` reads What's New only while the splash is actually advertising it, because "PRESS ANY
+  KEY" has to mean any key starts Logo.
 - **A program waiting on `READ` owns the keyboard**, and is checked *before* the busy test,
   because a program parked on `READ` is still running.
 - **While a program runs**, only `ESC`/`Alt-B` do anything. Everything else is dropped, so a child
@@ -139,7 +147,17 @@ because they are what makes the machine feel solid:
   hidden listener line.
 
 `Alt-?` is the quick reference. Because browsers eat `Alt+?` on some layouts, `Alt-Q`, `Alt-/` and
-`Ctrl-/` all open it too.
+`Ctrl-/` all open it too. `Alt-,` reaches settings as the token `A-COMMA`, which `mapKey` has to
+name explicitly: a browser reports a punctuation key by its own character, so the generic
+`A-` + letter rule would have produced `A-,` and matched nothing.
+
+Overlays are one stack and one painter shape. The quick reference and What's New are *paged* lists
+painted through `PaintPaged`, whose rows are wrapped by `WrapRows` before they reach it — wrapping
+once, at the point the list is built, is what makes the pager's row count the number of rows the
+child actually sees rather than the number of lines the author wrote. The bug this removed was
+`Fit()` truncating at 40 columns, so a help entry ended mid-sentence, a description ended in an
+ellipsis, and a long session row lost its last digit off the right edge. `TextWrap` in Core is the
+one implementation the reference, the dashboard and the listener all use.
 
 ---
 
@@ -230,7 +248,15 @@ matters: `OUTPUT COUNTDOWN :N - 1` reaches the procedure through `EvalBareWordAs
 a trampoline there the classic countdown recursion still overflowed the stack.
 
 **Case folding.** `FoldCase` defaults to true, which makes everything uppercase and is why
-`TO F` collides with `FIRST`'s alias `F`.
+`TO F` collides with `FIRST`'s alias `F`. It is also why a pitch name has to be matched upper case:
+a child who types `TOOT "Bb3` hands `LogoPitch` the word `BB3`, and a flat that stopped being a flat
+in the reader is a wrong note rather than an error (§8).
+
+**Bare `TRUE` and `FALSE` are values**, resolved *last* in `EvalBareWordAsync` — after primitives,
+after the child's own procedures, after variables — so a program that took one of those names keeps
+what it defined. Logo prints a boolean as one of the two words, and until now reading it back fell
+through to "I don't know the name FALSE", which made `SETSOUND FALSE` and the `SETCASE FALSE` this
+document tells people to type both fail.
 
 ### Limits
 
@@ -278,8 +304,11 @@ graphics region and keeps the aspect ratio (or a circle becomes an ellipse).
 blue copy offset right, then the true colour on top. That is the sub-pixel smear a real
 television-made Apple II display produced on a bright line.
 
-Only the six true hi-res colours are used (`PALETTE` in `interop.js`); Logo's `SETPC 0-15` is
-folded onto them so what appears is what the hardware could show.
+The full 16-colour Logo palette is drawn (`PALETTE` in `interop.js`, mirrored by
+`ApplePalette.Hex` in Core and pinned equal by `ReleaseOneOneTests`, which reads the JavaScript out
+of `wwwroot`), and only the first six —
+the colours a real hi-res screen could produce — carry the fringe. `SETPC 6-15` used to be folded
+onto 0-5, which is why a program that picked `RED` drew green.
 
 `Arc`/`Circle` draw true chords (`2r·sin(δ/2)` with half-turns either side), so the turtle stays
 exactly on the circle with no drift to correct.
@@ -294,6 +323,24 @@ screen. `ReplayGraphicsAsync` records `_sentBackground`, and any change to it fo
 **The turtle is live state, not part of the replayed picture**, so it travels with the replay *and*
 after every append (`SetTurtleAsync` → `setTurtle` in `interop.js`), otherwise it lags behind the
 line it is drawing. This is what makes `HT`, `ST` and `SETSHAPE` do something visible.
+
+**The turtle glides; it does not teleport.** `setTurtle` receives the target state and a duration
+(`ms`, derived from `Engine.Speed`), and `interop.js` draws the frames in between: position lerps,
+the heading takes the shortest way round (so `RT 350` turns seven degrees rather than unwinding
+three hundred and fifty), and visibility fades instead of blinking. `gfx.shown` is what is on
+screen and `gfx.turtle` is where Logo wants it, so two commands arriving in the same frame start
+the next tween from the drawn position rather than snapping backwards. `SHAPE 0-5` picks the
+drawing — arrow, triangle, turtle, dot, car, ball — from `TurtleShapes.Names` in Core, which is the
+list the interpreter validates against and the list `VIEWSHAPES` draws cards from, using this same
+painter at a larger `lenOverride` (see §7).
+
+**Speed is a pause, not a clock.** `Engine.StepAsync` yields once per 3000 evaluation steps, and
+`WasmHost.YieldAsync` is the only place a program can be slowed without changing how fast it
+computes: it waits `Engine.FrameDelayMs(speed)` — `(100 - speed) * 6` ms — after the repaint.
+`SETSPEED 25` is 450 ms a frame, `SETSPEED 100` is no pause at all. The operating system's
+`prefers-reduced-motion` overrides the whole range: the browser reads it, calls back into the app,
+and Logo draws instantly however the child left `SETSPEED`. The CSS scanline animation stops under
+the same query; the cursor keeps blinking because it is a position indicator, not an effect.
 
 **Resizing the window repaints the canvas.** The CSS box grows but a canvas keeps its old bitmap, so
 the resize listener calls `resizeGraphics()` as well as `fitGrid()` — without it the picture is
@@ -334,9 +381,111 @@ hand the turtle's page back to text.
 the getting-started lesson (`FD 100`, `RT 90`, `Alt-?`). Once Logo starts there are only four text
 rows, and a four-row window cannot hold an explanation — so the greeting is two short lines.
 
+**The two picture charts are viewers, not drawings.** `VIEWCOLORS` (`Alt-V`) shows all sixteen pen
+colours with the number a child types into `SETPC`, and `VIEWSHAPES` (`Alt-W`) shows all six turtle
+shapes with the number a child types into `SHAPE`. Both exist because the text grid is one phosphor
+colour and can neither show red nor draw a car — a colour chart drawn in green on green would be a
+joke, and a shape chart that only names the shapes leaves "what does SHAPE 4 look like" unanswered.
+
+Both are drawn on the canvas by reusing the replay path: `ColorChart.Swatches()` and
+`ShapeChart.Cards()` produce items in scene units, `PaintColorsAsync`/`PaintShapesAsync` serialise
+them, and they go to the same `replayGraphics` a spiral uses — with background 0 and `textRows 0`, so
+the canvas covers the whole grid and every entry is legible at once. `ShowViewer` is one method
+serving both, because a canvas can only show one of them and everything that depends on that is
+identical.
+
+**The shape chart is drawn by the turtle's own painter.** `drawShapeCard` calls `drawTurtle` with a
+`lenOverride` (26 scene units rather than the turtle's 9) — not a second copy of each shape. That is
+the whole design: a chart that redrew "car" for itself could quietly disagree with the turtle, and
+this one cannot show a shape the turtle is not capable of wearing. The wing barbs scale with the
+length, so a big turtle is a proportionally big turtle rather than a long spike with stubby wings.
+
+Three things make either chart a viewer rather than a drawing.
+
+1. Nothing enters `Engine.Scene`, so a chart is never saved into the session and never exported into
+   the child's `.logo` file — a downloaded spiral must not come back with boxes painted over it.
+   `GraphicsScene` deliberately has **no `Add(DrawSwatch)` or `Add(DrawShapeCard)` overload**: an
+   overload there would be one keystroke away from putting a viewer into the picture, and the only
+   test that could catch it would be one that asserts the absence of a method.
+2. `_viewerOpen` stands the replay, append and turtle paths down while a chart is up, so a program
+   still running cannot paint through it; closing clears the flag and replays, which is what puts the
+   child's own picture back. `DiscardOverlay` clears it too — a flag left set by a view change
+   underneath the chart would freeze the canvas *permanently*, every later drawing made and never seen.
+3. It owns the keyboard. Alt-L, Alt-E, Alt-T and Alt-S are ignored rather than half-applied, so
+   nothing can be stacked underneath it or change the view it returns to. Alt-I, Alt-, and Alt-?
+   leave the chart **and** open the page they name, because a child who presses Alt-, while looking at
+   swatches means settings and not "go back and press it again" — but only when the chart was opened
+   at the listener, since opened from the settings list, going back *is* the answer. Alt-V and Alt-W
+   switch between the two charts instead of closing, because flipping between "what colour is 9" and
+   "what is shape 4" is one task; pressing the key of the chart already shown closes it, which is what
+   makes a toggle findable at all.
+
+The geometry lives in Core rather than in `interop.js` so it can be tested without a browser. Each
+colour box is outlined in the same colour as its label — colour 0 is black on black, and without the
+outline the swatch of it is an empty rectangle — and each shape caption goes *under* its box, because
+inside it is where the shape is.
+
+**With no canvas, a chart prints itself as text.** `ReplayGraphicsFunc` is null only in the headless
+host and in tests — a browser always has a canvas — but the rule that matters is that neither chart may
+ever open a blank screen, so `ShowViewer` prints `ColorChart.TextLines()` or `ShapeChart.TextLines()`
+instead. Those rows are packed to the full 40 columns with `TextWrap.Pack` rather than fixed at a
+count per row, and the headline is printed **last**. Both choices are about the same thing: EASY mode's
+window is four rows, and sixteen colours or six shapes is longer than that, so anything printed before
+the list scrolls off the top and the one line a child needs to see is the line they cannot see. A
+headline is also `Announce`d rather than `Say`d, because a chart can be asked for from the editor, where
+`Say` would print into the child's own source. The headline names the key that opens *its own* chart —
+`Alt-V`/`Alt-W`, not `Alt-T`, which a viewer deliberately ignores, and a hint that does nothing is worse
+than no hint.
+
 ---
 
-## 8. Friendly errors
+## 8. Sound
+
+`TOOT` is the only thing in the language that leaves the screen, and it is the command that turns a
+drawing program into a game: a coin picked up, a wall hit, a level cleared. Coleco ADAM SmartLOGO
+and Apple Logo II both had it.
+
+**Core decides everything except the waveform.** `SoundPrimitives` validates the pitch and the
+length, and the browser is handed two numbers — a frequency and a duration. That split is what makes
+a sound command testable at all: `FakeBrowser` records the tones it was asked for, so the pitch
+table, the ranges and the error messages are covered by ordinary unit tests, and nothing in the
+language depends on a browser that may not be there.
+
+**A pitch is hertz or a note name.** `TOOT 440` and `TOOT "A4 0.5` both work; `LogoPitch` maps a
+name to hertz at equal temperament with A4 = 440, accepting `C#5`, `Bb3`, the Unicode signs `♯`/`♭`,
+and an omitted octave (which means the fourth, because that is where a beginner starts). The
+accidental is matched upper case as well, because **the reader folds every word to capitals before a
+primitive sees it** — a child who types the correct name of the note `Bb3` hands us `BB3`, and a
+flat that stopped being a flat in the reader is a wrong note, not an error. Accepted range is
+16–8000 Hz and 0.02–5 s; the hint at the bottom of the range quotes a real note name, which
+`SoundTests` reads back through the same table to prove the hint is not nonsense.
+
+**Tones are queued, never awaited.** `Engine.PlaySoundAsync` returns as soon as the browser has the
+numbers; `interop.js` schedules them on the Web Audio clock one after another (`toneUntil`), so
+`REPEAT 3 [TOOT 440 0.1 TOOT 550 0.1]` is six notes in sequence however fast Logo ran the six
+commands. Awaiting instead would make a program that plays a two-second note unbreakable for two
+seconds. `RequestBreak` and `SETSOUND FALSE` both call `StopSounds`, because a tune that goes on
+playing after ESC — or after being switched off — is not actually stopped. The notes still waiting
+are held in a `Set` that each note removes itself from when it has been heard: an array plus a
+`filter` per note made `REPEAT 2000 [TOOT 440 0.02]` quadratic, copying the whole remaining queue
+two thousand times.
+
+**The waveform is a square wave at one fifth of full scale**, following
+`Docs/8-bit Sound Code Example.htm`: an `OscillatorNode` through a `GainNode`. A square wave is all
+harmonics, which is what makes it sound like an 8-bit machine, and at full volume it is a harsh buzz.
+A few milliseconds of ramp at each end keep the note from starting with a click. The `AudioContext`
+is created lazily on the first tone and resumed there too: a context built before the child's first
+keypress sits suspended and silently loses every note scheduled into it, which is exactly the shape
+of bug that makes a working sound command look broken.
+
+**Sound is one switch, remembered with the other settings.** `SETSOUND`/`SOUND` in the language,
+a `SOUND` row in the settings screen, `Store.SoundEnabled` in localStorage beside the monitor colour
+and the speed — on by default, because a child who has never opened settings expects a new command
+to make a noise.
+
+---
+
+## 9. Friendly errors
 
 `ErrorText` speaks two voices. EASY is plain English plus a nearest-match hint; ADVANCED is terse,
 as Apple Logo was. `ErrorText.Nearest` is Levenshtein over primitive names, aliases, and the
@@ -350,7 +499,7 @@ tail of an explanation for a message they never saw.
 
 ---
 
-## 9. Sessions
+## 10. Sessions
 
 `SESSION1.logo`, `SESSION2.logo`, … maximum 12, all in **one** namespaced localStorage key
 (`maturinlogo.sessions.v1`) holding a versioned `StoreFile`. Versioning means a future format can
@@ -406,7 +555,7 @@ the session.
 
 ---
 
-## 10. The splash turtle
+## 11. The splash turtle
 
 The ASCII turtle is **generated, not hand-typed**: an ellipse-based shell (rim band plus a scute
 lattice), head, four flippers and a tail were rasterised into a 40x12 cell grid and the result
@@ -417,7 +566,7 @@ Seen from above, which is how Logo's turtle actually lives.
 
 ---
 
-## 11. Offline
+## 12. Offline
 
 Self-hosted **VT323** (`wwwroot/fonts/vt323.woff2`, 17.9 KB, SIL Open Font License) — no Google
 Fonts, no CDN, no remote quick reference. The reference is generated at runtime from the very
@@ -434,7 +583,7 @@ runtime files are all in the offline bundle.
 
 ---
 
-## 12. EASY vs ADVANCED
+## 13. EASY vs ADVANCED
 
 | | EASY | ADVANCED |
 |---|---|---|
@@ -449,14 +598,18 @@ window to find out what went wrong.
 
 ---
 
-## 13. Keyboard map
+## 14. Keyboard map
 
 | Key | Action |
 |---|---|
 | `Alt-?`, `Alt-Q`, `Alt-/`, `Ctrl-/` | Quick reference (scrollable, `ESC` closes) |
+| `Alt-,` | settings: monitor, CRT, mode, drawing speed, sound, colour chart, shape chart, What's New, About |
 | `Alt-M` | EASY / ADVANCED |
 | `Alt-G` | green / amber phosphor |
 | `Alt-C` | CRT emulation on / off |
+| `Alt-I` | info dashboard |
+| `Alt-V` | the colour chart: all sixteen pen colours with their numbers |
+| `Alt-W` | the shape chart: all six turtle shapes with their numbers |
 | `Alt-L` | sessions: new / open / delete |
 | `Alt-S`, `Ctrl-S` | save (`Ctrl-S` is mapped so the browser's own page-save dialog does not open) |
 | `Alt-D` | download `.logo` source |
@@ -469,9 +622,9 @@ window to find out what went wrong.
 
 ---
 
-## 14. Command reference
+## 15. Command reference
 
-**136 commands and 8 syntactic words.** Everything from the first `###` heading below to the last row
+**144 commands and 8 syntactic words.** Everything from the first `###` heading below to the last row
 of the syntactic-word table is generated from `PrimitiveTable.CreateDefault()` — the very table that
 runs the language — so it cannot list a command that does not exist or omit one that does. After
 adding a primitive, re-run the generator:
@@ -483,7 +636,7 @@ dotnet run --project Tools/DocGen -- --check  # report drift, change nothing, ex
 
 `Tools/DocGen` replaces only the block between the two `<!-- generated:command-tables -->` sentinels,
 so the prose above and below stays hand-written. It is deliberately **not** in the solution, so
-`dotnet build` and `dotnet publish` never touch it. `CommandReferenceTests` (§15) checks the same
+`dotnet build` and `dotnet publish` never touch it. `CommandReferenceTests` (§16) checks the same
 facts in CI, which is what makes forgetting the generator a build failure instead of a stale table
 nobody notices.
 
@@ -512,7 +665,7 @@ coming from BASIC or Python:
 At the listener a reporter prints its answer and a command does not, so `PRINT 2 + 2` answers `4`
 while `FD 100` answers nothing. In **EASY** mode a bare reporter also prints its value.
 
-The keyboard shortcuts (`Alt-?`, `Alt-S`, …) are browser commands, not Logo ones — they are in §13.
+The keyboard shortcuts (`Alt-?`, `Alt-S`, …) are browser commands, not Logo ones — they are in §14.
 
 ### On-screen help
 
@@ -522,7 +675,7 @@ The keyboard shortcuts (`Alt-?`, `Alt-S`, …) are browser commands, not Logo on
 
 <!-- generated:command-tables:start -->
 
-### Turtle — 27 commands
+### Turtle — 28 commands
 
 | Command | Inputs | Kind | Does what | Try |
 |---|---|---|---|---|
@@ -544,13 +697,14 @@ The keyboard shortcuts (`Alt-?`, `Alt-S`, …) are browser commands, not Logo on
 | `PU`<br/>*or PENUP* | 0 | command | Lift the pen so the turtle moves without drawing. | `PU FD 100` |
 | `RT`<br/>*or RIGHT* | 1 | command | Turn the turtle right (clockwise) by that many degrees. | `RT 90` |
 | `SETH`<br/>*or SETHEADING* | 1 | command | Point the turtle at an absolute heading: 0 north, 90 east, 180 south, 270 west. | `SETH 180` |
-| `SETPC`<br/>*or SETPENCOLOR, PENCOLOR* | 1 | command | Choose the pen colour: 0 black, 1 green, 2 white, 3 purple, 4 orange, 5 blue. | `SETPC 4` |
+| `SETPC`<br/>*or SETPENCOLOR, PENCOLOR* | 1 | command | Choose the pen colour, 0 to 15: 0 black, 1 green, 2 white, 3 purple, 4 orange, 5 blue. | `SETPC 4` |
 | `SETX` | 1 | command | Move the turtle to an x position without drawing. | `SETX 50` |
 | `SETXY` | 2 | command | Move the turtle to a position given as two numbers or as a list [x y]. | `SETXY 20 30` |
 | `SETY` | 1 | command | Move the turtle to a y position without drawing. | `SETY 40` |
-| `SHAPE`<br/>*or SETSHAPE* | 1 | command | Choose the turtle's shape: 0 arrow, 1 triangle, 2 turtle, 3 dot, 4 car, 5 ball. | `SHAPE 2` |
+| `SHAPE`<br/>*or SETSHAPE* | 1 | command | Choose the turtle's shape: 0 arrow, 1 triangle, 2 turtle, 3 dot, 4 car, 5 ball. Type VIEWSHAPES to see them. | `SHAPE 2` |
 | `ST`<br/>*or SHOWTURTLE* | 0 | command | Show the turtle. | `ST` |
 | `TOWARDS` | 2 | reporter | Report which way the turtle would have to point to head straight at that spot. | `PRINT TOWARDS 30 40` |
+| `VIEWSHAPES`<br/>*or VIEWSHAPE, SHAPES* | 0 | command | Show every turtle shape with its number, drawn the way the turtle wears it. | `VIEWSHAPES` |
 | `XCOR` | 0 | reporter | Report the turtle's x position. | `PRINT XCOR` |
 | `YCOR` | 0 | reporter | Report the turtle's y position. | `PRINT YCOR` |
 
@@ -675,7 +829,7 @@ The keyboard shortcuts (`Alt-?`, `Alt-S`, …) are browser commands, not Logo on
 | `SHOW`<br/>*or SH* | 1 | command | Print one value on its own line. | `SHOW 2 + 2` |
 | `TYPE` | many | command | Print without moving to a new line. | `TYPE "HELLO TYPE " THERE` |
 
-### Screen — 11 commands
+### Screen — 14 commands
 
 | Command | Inputs | Kind | Does what | Try |
 |---|---|---|---|---|
@@ -689,9 +843,12 @@ The keyboard shortcuts (`Alt-?`, `Alt-S`, …) are browser commands, not Logo on
 | `SCROLL` | 0 | command | Slide the text up one line. | `SCROLL` |
 | `SETBG` | 1 | command | Choose the background colour of the graphics page. | `SETBG 0` |
 | `SETCURSOR` | 2 | command | Move the text cursor to a row and column, counting from 1. | `SETCURSOR 5 1` |
+| `SETSPEED` | 1 | command | Choose how fast the turtle draws, from 25 (slow) to 100 (fast). | `SETSPEED 60` |
+| `SPEED`<br/>*or GETSPEED* | 0 | reporter | Report how fast the turtle draws, from 25 to 100. | `PRINT SPEED` |
 | `TEXT` | 0 | command | Show the whole screen as text again. | `TEXT` |
+| `VIEWCOLORS`<br/>*or VIEWCOLOR, COLORS, COLOURS* | 0 | command | Show every pen colour with its number and name. | `VIEWCOLORS` |
 
-### Logo itself — 12 commands
+### Logo itself — 16 commands
 
 | Command | Inputs | Kind | Does what | Try |
 |---|---|---|---|---|
@@ -704,7 +861,11 @@ The keyboard shortcuts (`Alt-?`, `Alt-S`, …) are browser commands, not Logo on
 | `PROCTEXT` | 1 | reporter | Report the source of a procedure so it can be printed or saved. | `PRINT PROCTEXT "SQUARE` |
 | `RANDSEED` | 1 | command | Choose the seed for RANDOM so a game can be repeated exactly. | `RANDSEED 5` |
 | `SETCASE` | 1 | command | Tell Logo whether to turn words into capital letters. | `SETCASE FALSE` |
+| `SETSOUND` | 1 | command | Turn Logo's sound on or off. | `SETSOUND FALSE` |
+| `SETTINGS` | 0 | command | Open the settings screen: monitor, CRT, mode and drawing speed. | `SETTINGS` |
 | `SHOWSEED` | 0 | reporter | Report the seed RANDOM is using. | `PRINT SHOWSEED` |
+| `SOUND` | 0 | reporter | Report whether Logo makes a sound. | `PRINT SOUND` |
+| `TOOT` | many | command | Play a note. The pitch is hertz or a note name like "A4; the length in seconds is optional. | `TOOT 440 0.3` |
 | `VERSION` | 0 | reporter | Report which Logo this is. | `PRINT VERSION` |
 | `WHO` | 0 | command | Report the names of everything defined this session. | `WHO` |
 
@@ -726,11 +887,11 @@ primitive dispatch, so they are not callable procedures.
 
 ---
 
-## 15. Testing
+## 16. Testing
 
-303 tests, all green. `dotnet build` and `dotnet test` are clean; `dotnet publish` produces a
-working offline bundle. **This is the only place the total is stated** — a test count cannot verify
-itself, so repeating it elsewhere just multiplies the staleness.
+498 tests, all green, plus the three Node harnesses described below. `dotnet build` and `dotnet test`
+are clean; `dotnet publish` produces a working offline bundle. **This is the only place the total is
+stated** — a test count cannot verify itself, so repeating it elsewhere just multiplies the staleness.
 
 - **Interpreter** (reader, evaluator, primitives, turtle, errors, recursion, loops) — the
   executable spec of the language.
@@ -749,7 +910,29 @@ itself, so repeating it elsewhere just multiplies the staleness.
   primitives that exist (both directions: nothing missing, nothing left behind after a rename), with
   the aliases, the family counts, the totals and the version it claims, and every section heading must
   be in the contents. The doc is linked into the test output directory by a `Content Include`, so
-  these run without depending on a working directory.
+  these run without depending on a working directory. Sections are found by title rather than by
+  number, so inserting one here no longer means editing the test that reads this document.
+- **Sound** (`SoundTests.cs`) — `TOOT` end to end: hertz, note names, the ranges, the variadic
+  one-or-two-inputs shape, and each error code by name. `LogoPitch` is checked note by note, which
+  caught that the reader folds `TOOT "Bb3` to `BB3` before any primitive sees it — a flat that turns
+  into the note B in the reader is a wrong note, not an error. Plus the switch (`SETSOUND`/`SOUND`),
+  its persistence, `ESC` silencing a queued tune, and the settings row. The tone assertions read the
+  frequency and length `FakeBrowser` was handed, so the whole command is covered without a browser.
+- **The colour chart** (`ColorChartTests.cs`) — the swatch grid fits 280×192, is evenly spaced and
+  centred, labels every colour with its `SETPC` number, and picks a caption that reads against its
+  own box. The rest guards the design: the chart never enters `Engine.Scene` (so it cannot be saved
+  or exported), a program run behind it cannot replay or append over it, closing puts the child's
+  picture and background back, and without a canvas the command says so instead of opening a blank
+  screen.
+- **The 1.1 report** (`ReleaseOneOneTests.cs`) — one test per bug and feature in
+  `Docs/Additional Features.md`: name validation, `SHAPE` reaching the canvas, the 16-colour palette,
+  `SETSPEED` and its persistence, the reduced-motion override, every overlay row fitting 40 columns,
+  the reference being alphabetical, and the settings/about/what's-new screens' key routing. It also
+  reads `wwwroot/js/interop.js` (linked as `Content`, like the doc) and asserts its `PALETTE` equals
+  `ApplePalette.Hex` and its `SHAPES` equals `TurtleShapes.Names` — the two halves of the app speak
+  JSON, and nothing else would notice them drifting. A companion test checks that every key token the
+  machine switches on is one `mapKey` can actually produce, since a dead shortcut is invisible to a
+  C#-only suite.
 
 Two rules the tests encode, because they are the things that broke during development:
 
@@ -758,31 +941,58 @@ Two rules the tests encode, because they are the things that broke during develo
 2. The fake `YieldFrameFunc` must **actually await**, or a running program can never be
    interrupted and the break tests are meaningless.
 
-### In a real browser
+### The browser layer, without a browser
 
-Unit tests cannot see a canvas, a font, or a stretched bitmap, so four Playwright scripts run
-against the dev server (kept in the session folder, not the repo):
+Unit tests cannot see a canvas, a font, or a stretched bitmap — and neither can a C# suite that
+only ever talks to `FakeBrowser`. What the language does is tested in `dotnet test`; what the
+JavaScript *actually draws and schedules* is tested by three Node harnesses in
+`Tools/BrowserCheck`, which load the real `interop.js` against a fake DOM and assert on the calls it
+makes. They need no build step and no browser: `node Tools/BrowserCheck/check-js.cjs`.
 
-- `e2e.mjs` — boot, splash art, typing, the quick reference scrolling, arrow history, an error and
-  its hint, localStorage, amber, reload, **zero off-origin requests**, a long program keeping the
-  page responsive, `ESC` break, `READ`, and a clean console.
-- `visual.mjs` — screenshots plus pixel counts: the turtle is drawn at start (236 bright pixels),
-  `HT` hides it and `ST` shows it, a spiral animates, amber + CRT render together, and the homage
-  line is not cut mid-word.
-- `regress.mjs` — every adversarial finding driven through the real keyboard path, including the
-  crash repro (`Alt-T` with 300 characters typed, then keep typing), `Ctrl-S`, a viewport resize
-  checking `canvas.width` against its CSS box × devicePixelRatio, and `SETBG` inside a running
-  program.
-- `paint.mjs` — the listener painter: `Alt-L` → `N` really creates a session (the lowercase-key
-  bug), a long typed line is painted exactly once, `Alt-T` mid-line neither duplicates nor loses it,
-  `Alt-E` in the editor is a no-op, and an overlay opening from the editor is not painted over.
+- `check-js.cjs` — the turtle tween and the palette: 16 colours with `paletteOf(8)` really `RED`,
+  six shapes, a tween that lands on its target, a heading that takes the **shortest arc** (`350 → 0`
+  is ten degrees, not three hundred and fifty), `HT` that fades instead of blinking, and
+  `watchReducedMotion` both reporting the current value and pushing a later change back into .NET.
+  Then every shape in every colour through `drawTurtle`, which must not throw.
+- `smoke.cjs` — the painting and routing path: `fitGrid` sizing the canvas from its CSS box,
+  `setTheme` writing the attributes the stylesheet keys on, `replayGraphics`/`appendGraphics`
+  item counts, and **every token `mapKey` can emit** — the test that would have caught `Alt-,`
+  producing `A-,` and therefore opening nothing.
+- `chart-sound.cjs` — this release's additions: both `VIEWCOLORS` and `VIEWSHAPES` payloads through
+  the real `paint()` (sixteen fills, sixteen outlines, sixteen labels; six cards, six captions under
+  their boxes, nothing outside 280×192, and the black swatch still outlined because a black box on
+  black is otherwise invisible), and `playTone` against a fake `AudioContext` (square wave, gain held
+  at 0.2, two ramps so a note is not a click, notes queued sequentially on the audio clock,
+  `stopTones` silencing the queue, a suspended context resumed before anything is scheduled into it,
+  and out-of-range pitches clamped). Its palette and shape names are read out of `ApplePalette.Names`
+  and `TurtleShapes.Names` in Core rather than typed out again, so neither chart can silently drift
+  from the language it is showing.
 
-**These scripts found three bugs no unit test could see**, all three caused by the real browser
-delivering lowercase single characters or by asynchronous overlay timing. Treat the browser pass as
-part of the test suite, not a smoke test. Two operational traps: a `dotnet run --no-build` server
-caches the boot manifest, so after a rebuild the browser silently gets the **old** wasm until the
-server restarts — verify by logging `request` events and checking the requested
-`MaturinLogo.Core.<hash>.wasm` name; and a deterministic `QuotaExceededError` needs
+**Measure, do not count.** Two of this harness's assertions were written against the payload rather
+than against what the browser did with it, and mutation testing caught both. The shape chart's whole
+claim is that a card draws a *bigger* turtle than the live cursor; the first check only asserted a
+card "draws a shape", so deleting `lenOverride` from `interop.js` still passed. The caption check only
+asserted the JSON asked for a position below the box, so replacing the painter's `textx`/`texty` with
+a centred position — drawing every caption straight through its own shape — still passed too.
+
+Both were rewritten to record the points the painter actually touches and compare what comes out: the
+drawn width against the live turtle's (16 px against 46 px at the same scale), and each caption's
+`y` against the bottom of its own box. Re-running either mutation now fails, and the reverse case is
+pinned as well — the colour chart's labels *are* measured to sit inside their boxes, because that is
+the one difference between the two kinds of card. A test that counts calls proves a function ran; only
+a test that measures an outcome proves it did the right thing.
+
+**History, honestly:** the 1.0 and 1.1 browser passes were four Playwright scripts (`e2e`, `visual`,
+`regress`, `paint`) run against the dev server, and they found three bugs no unit test could see —
+all of them caused by the real browser delivering lowercase single characters or by overlay timing.
+They were kept in a session working directory, which is ephemeral, and they are gone. Everything
+they caught is now a C# test, and the parts of them that could only be checked in JavaScript are the
+harnesses above, which are in the repository. **Do not describe a check that cannot be re-run.**
+
+Two traps worth remembering from that era, both about the *tooling* rather than the app: a
+`dotnet run --no-build` server caches the boot manifest, so after a rebuild the browser silently
+gets the **old** wasm until the server restarts (verify by logging `request` events and checking the
+requested `MaturinLogo.Core.<hash>.wasm` name); and a deterministic `QuotaExceededError` needs
 `setItem` stubbed to throw, because Chromium grows a persistent origin's quota on demand.
 
 A canvas "blank" means zero **bright** pixels, not zero non-transparent ones: `paint()` fills the
@@ -819,7 +1029,9 @@ no meaning at all, was deleted instead.
 ### Second review pass
 
 The next pass found seven more. All were reproduced as failing tests first, and all are covered by
-`PainterReviewTests.cs` (23 tests, grouped by `// ---- Issue N:`).
+`PainterReviewTests.cs`, grouped under `// ---- Issue N:` headers. No count is stated here, unlike the
+one at the top of this section: a per-file number written down once is a number that goes stale
+silently, and this sentence used to claim 23 for a file that had already grown.
 
 | # | Severity | Finding | Fix |
 |---|---|---|---|
@@ -841,25 +1053,58 @@ rows, nothing else may write into them, and the rows must be erased using the bl
 Once that was a single record, the duplication, the ghosts, the stranded `Alt-T` caret and the
 spliced message were all the same bug.
 
+### The 1.2 round
+
+The sound and colour-chart work turned up five defects of its own. Four are caught by a `dotnet test`
+that fails without the fix; #4 is guarded rather than caught — the harness queues two thousand notes,
+which proves a long tune behaves but would only have been *slow* before. Each is described here as it
+actually presented, because the mechanisms are the useful part.
+
+| # | Severity | Finding | Fix |
+|---|---|---|---|
+| 1 | High | `DiscardOverlay` cleared the overlay stack but not `_chartOpen`. Reached, that freezes the canvas permanently — every later drawing made and never seen. Not reachable from the keyboard today, because the chart owns the keys, which is exactly why it sat unnoticed: it is a trap for the next person who adds a global key to `HandleColorsKey` | `DiscardOverlay` clears the flag and replays, and a test drives BYE past the chart through the engine |
+| 2 | High | `TOOT` was registered with `Inputs = -1` but without `variadic: true`, so the arity check compared against minus one and no call ever reached the browser. The symptom was a silent command, since the failure was an arity error the test harness was not asserting on | registered variadic, which is what `PRINT` and `WORD` already do |
+| 3 | Medium | `TOOT "Bb3` played the wrong note, a semitone sharp. The regex matched the folded `BB3` case-insensitively and captured the second `B` as the accidental, but the `switch` on its value tested for a lower-case `"b"` — so it fell through to "no accidental" and read B natural. A match that succeeds and a capture that is then silently ignored is a nastier shape than a parse failure | the accidental is normalised to upper case before it is read, and `SoundTests` pins the folded and unfolded spellings equal |
+| 4 | Medium | `liveTones` was an array with a `filter` over the whole list on every note, so a long tune was quadratic | a `Set` each note removes itself from; the harness queues two thousand notes, which is what made the old cost visible |
+| 5 | Low | `LogoPitch.NoteName` takes hertz but the out-of-range hint passed it a MIDI number, so `TOOT 5` quoted a note called `G-1` — a name the pitch table itself refuses, in a hint whose whole job is to name a playable note | the hint passes hertz, and a test reads the note back out of the hint's own text |
+
+Two things that were bugs in the *language* rather than in the new code, both found because `TOOT`
+happened to need them: bare `TRUE`/`FALSE` did not evaluate (§5), which meant `SETSOUND FALSE` and
+the `SETCASE FALSE` this document has always told people to type both failed; and `ENTER` on the
+settings `SOUND` row did nothing at all, because `ToggleCurrent` had not been told the row existed.
+
+And one that was a bug in the *test suite*: `CommandReferenceTests` located the command reference by
+its section number, so inserting §8 Sound broke seven tests that had nothing to do with sound. It
+finds sections by title now, which is the only reason adding a section to a document you are pinning
+is safe.
+
 ---
 
-## 16. Known gaps / future
+## 17. Known gaps / future
 
-`Docs/Additional Features.md` holds the wish list: localisation, an examples library, 8-bit sound
-(see `Docs/8-bit Sound Code Example.htm`), an animation-speed control, about/resources screens, and
-a downloadable exception log. Terrapin-only surfaces (bitmaps, controls, ports, arrays, property
-lists, multi-turtle `TELL`/`ASK`) are out of scope; the primitive table leaves room for them.
+`Docs/Additional Features.md` holds the wish list: localisation, an examples library, a demo mode,
+additional-resource links, and a downloadable exception log. Terrapin-only surfaces (bitmaps,
+controls, ports, arrays, property lists beyond `PUT`/`GET`, multi-turtle `TELL`/`ASK`) are out of
+scope; the primitive table leaves room for them. Settings, About, What's New, `SETSPEED` and the
+16-colour palette landed in 1.1; `TOOT` (the 8-bit sound the example in
+`Docs/8-bit Sound Code Example.htm` describes), `SETSOUND` and `VIEWCOLORS` landed in 1.2. The
+40-column grid stays: 80 columns would mean re-laying out every painter, and the wrapping added in
+1.1 removed the cut-off text that made 40 look too small.
+
+Sound stops at one waveform on one oscillator. A real Apple II could not make a chord, and the
+square wave is the sound being aimed at; `TOOT` queued on the audio clock is enough for a game, and
+anything richer belongs in a sample, which this app deliberately does not fetch.
 
 ---
 
-## 17. Glossary
+## 18. Glossary
 
 Terms in alphabetical order. Anything a section explains in more depth is linked.
 
 | Term | Meaning here |
 |---|---|
 | **Apple IIe** | The 1983 home computer this UI imitates: 40 columns × 24 rows of text, a green or amber phosphor monitor, and a hi-res graphics page. |
-| **arity** | How many inputs a command takes. Declared per primitive (`FD` is 1, `SETITEM` is 3); `many` means variadic. See [§14](#14-command-reference). |
+| **arity** | How many inputs a command takes. Declared per primitive (`FD` is 1, `SETITEM` is 3); `many` means variadic. See [§15](#15-command-reference). |
 | **block** (painted block) | The run of grid rows currently occupied by the line being typed. `PaintedBlock` records its geometry so it can be erased exactly as it was drawn. See [§4](#4-the-listener). |
 | **bracketed list** `[a b c]` | Logo's way of bundling commands or values together. In `REPEAT 4 [FD 50]` the brackets hold the commands to repeat. |
 | **CAR / CDR** | Lisp's names for "first item" and "everything but the first", which Logo kept alongside `FIRST` and `BUTFIRST`. |
@@ -879,7 +1124,7 @@ Terms in alphabetical order. Anything a section explains in more depth is linked
 | **Open Apple key** | The Apple II keyboard's modifier that this project maps to `Alt`. |
 | **overlay** | A screen that takes the grid away from the listener: the quick reference, the session manager, the editor, the info page. A stack; the grid is stashed and restored byte-for-byte. |
 | **phosphor** | The glowing coating that made a real CRT's text green or amber. `Alt-G` switches the two. |
-| **primitive** | A command built into Logo, as opposed to a *procedure* the child defines. All 136 live in `PrimitiveTable`. |
+| **primitive** | A command built into Logo, as opposed to a *procedure* the child defines. Every one lives in `PrimitiveTable`, which §15 counts. |
 | **procedure** | A user-defined command: `TO SQUARE :SIZE … END`. Stored as source text so reloading re-parses it. |
 | **prompt** `> ` | The characters Logo waits for input behind. Suppressed while a program is asking a question. |
 | **pull semantics** (input-consuming) | Logo's evaluation rule: a command *pulls* its inputs off the source stream after its name, which is why `FD 10 RT 90` is two calls and why `PRINT` can be variadic. The most important thing to understand about the evaluator. See [§5](#5-the-evaluator). |
@@ -906,7 +1151,9 @@ Terms in alphabetical order. Anything a section explains in more depth is linked
 
 | Version | Date | Changes |
 |---|---|---|
-| **1.0** | 2026-11-07 | First release. Complete Apple Logo II language: 136 commands and 8 syntactic words across turtle, math, words, lists, tests, variables, control, printing, screen and system. 24×40 Apple IIe screen with blinking cursor, green/amber phosphor and CRT overlay; color-fringed turtle graphics on a canvas. Splash with generated ASCII turtle; EASY/ADVANCED modes; keyboard-only `SESSIONn` sessions in localStorage with `.logo` download and import; scrollable `Alt-?` quick reference; ADVANCED full-screen editor. Reworked the listener painter around `PaintedBlock` row ownership with the engine cursor parked past the draft, which removed a family of duplicated drafts, ghosts and spliced messages. Ships with this document's contents, command reference (§14, generated from the primitive table by `Tools/DocGen`), glossary (§17) and revision history, pinned by `CommandReferenceTests` so they cannot silently drift. |
+| **1.2** | 2026-11-07 | Sound and the two picture charts. `TOOT` plays a note — hertz or a note name (`TOOT 440`, `TOOT "A4 0.5`), a square wave on the Web Audio clock following `Docs/8-bit Sound Code Example.htm`, queued rather than awaited so a tune never blocks the interpreter and `ESC` still breaks it. `SETSOUND`/`SOUND` and a `SOUND` row in settings carry the switch, remembered beside the monitor colour. `VIEWCOLORS` (`Alt-V`) draws all sixteen pen colours with the number a child types into `SETPC`, and `VIEWSHAPES` (`Alt-W`) draws all six turtle shapes with the number a child types into `SHAPE` — viewers painted through the existing replay path with a synthetic payload, so neither enters the scene, the session, or the exported `.logo` file, and `_viewerOpen` stands the replay/append/turtle paths down while one is up. The shape chart is painted by `drawTurtle` itself at a larger `lenOverride`, not a second copy of each shape, so it cannot show a shape the turtle cannot wear. `SHAPE`'s help and its error now point at `VIEWSHAPES`, and `Alt-V`/`Alt-W` switch between the two charts rather than closing and reopening. Bare `TRUE`/`FALSE` are now values, which fixes `SETSOUND FALSE` and the `SETCASE FALSE` this document has always told people to type. New section §8 Sound. The browser-pass subsection of §16 was rewritten: the four Playwright scripts it described lived in an ephemeral session folder and are gone, so what is actually in the repository — three Node harnesses under `Tools/BrowserCheck` that drive the real `interop.js` against a fake canvas and a fake `AudioContext` — is what is documented now. 144 commands, regenerated through `Tools/DocGen`; `CommandReferenceTests` finds its sections by title instead of by number so adding one here no longer breaks it. |
+| **1.1** | 2026-11-07 | Bug fixes and the settings pass. `SHAPE 0-5` now reaches the canvas — the engine was setting the shape and `setTurtle` was never sending it. The full 16-colour palette is drawn instead of folding `SETPC 6-15` onto 0-5, with the chromatic fringe kept for the six true hi-res colours. `SETSPEED 25-100` throttles the repaint pause (`Engine.FrameDelayMs`), `PRINT SPEED` reports it, and the operating system's `prefers-reduced-motion` overrides it and stops the CRT crawl. The turtle glides to its next position — position lerps, heading takes the shortest arc, `HT`/`ST` fades — instead of teleporting. Text no longer runs off the grid: one `TextWrap` helper feeds the quick reference, `Alt-I`, the session list and every paged overlay, and reference entries are alphabetised inside each family. Names are validated (`LogoReader.IsValidName`), so `TO SQUARE:` is refused rather than defining a procedure that can never be called. New: `Alt-,` settings screen (monitor, CRT, mode, speed, What's New, About), the About page, the What's New page offered from the splash, and the `SETSPEED`/`SPEED`/`SETTINGS` commands — 139 commands, regenerated through `Tools/DocGen`. |
+| **1.0** | 2026-11-07 | First release. Complete Apple Logo II language: 136 commands and 8 syntactic words across turtle, math, words, lists, tests, variables, control, printing, screen and system. 24×40 Apple IIe screen with blinking cursor, green/amber phosphor and CRT overlay; color-fringed turtle graphics on a canvas. Splash with generated ASCII turtle; EASY/ADVANCED modes; keyboard-only `SESSIONn` sessions in localStorage with `.logo` download and import; scrollable `Alt-?` quick reference; ADVANCED full-screen editor. Reworked the listener painter around `PaintedBlock` row ownership with the engine cursor parked past the draft, which removed a family of duplicated drafts, ghosts and spliced messages. Ships with this document's contents, command reference (§15, generated from the primitive table by `Tools/DocGen`), glossary (§18) and revision history, pinned by `CommandReferenceTests` so they cannot silently drift. |
 | 1.0-dev | 2026-11-07 | Pre-release milestones, in order: Logo reader, evaluator and primitive set with a cooperative step budget and `ESC` break; tail calls trampolined in both command and expression position, fixing stack overflow in classic recursion; the 40×24 grid, keyboard routing and canvas overlay ported from the AppleWorks approach in `C:\Dev\RetroWorks`; sessions, `.logo` export and offline publish; two adversarial review passes — 8 findings, then 7 more plus 3 caught only by the browser suites, all reproduced as failing tests before being fixed. |
 
 *The version number lives in `LogoInfo` (`Major`/`Minor`) so `PRINT VERSION`, the splash, the `Alt-I`

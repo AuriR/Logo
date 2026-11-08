@@ -25,6 +25,12 @@ public sealed class FakeBrowser
     public int ReplayCalls;
     public int YieldCount;
 
+    /// <summary>Every tone Logo asked the browser to play, in the order it asked.</summary>
+    public readonly List<(double Hertz, double Seconds)> Tones = new();
+
+    /// <summary>How many times Logo asked for silence: ESC, and SETSOUND FALSE.</summary>
+    public int ToneStops;
+
     /// <summary>What a write to localStorage should report. Set to false to simulate QuotaExceededError.</summary>
     public bool WriteResult = true;
 
@@ -49,6 +55,8 @@ public sealed class FakeBrowser
         };
         machine.AppendGraphicsFunc = _ => { AppendCalls++; return Task.CompletedTask; };
         machine.SetTurtleFunc = turtle => { LastTurtle = turtle; return Task.CompletedTask; };
+        machine.PlayToneFunc = (hertz, seconds) => { Tones.Add((hertz, seconds)); return Task.CompletedTask; };
+        machine.StopTonesFunc = () => ToneStops++;
 
         // A real await, not a completed task: the tests that press Esc mid-program need the engine
         // to actually give the thread back between steps, exactly as the browser does.

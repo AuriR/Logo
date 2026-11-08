@@ -94,7 +94,7 @@ public static class TurtlePrimitives
         t.Add("PC", 0, "Report the pen's current colour number.", "PRINT PC",
             CommandFamily.Turtle, (e, a, _) => Args.Number(e.Turtle.PenColor), isReporter: true);
 
-        t.Add("SETPC", 1, "Choose the pen colour: 0 black, 1 green, 2 white, 3 purple, 4 orange, 5 blue.", "SETPC 4",
+        t.Add("SETPC", 1, "Choose the pen colour, 0 to 15: 0 black, 1 green, 2 white, 3 purple, 4 orange, 5 blue.", "SETPC 4",
             CommandFamily.Turtle, (e, a, _) => { e.Turtle.PenColor = Args.Color(a, 0, "SETPC", e.Mode); return Args.Done(); },
             aliases: new[] { "SETPENCOLOR", "PENCOLOR" });
 
@@ -143,16 +143,29 @@ public static class TurtlePrimitives
             CommandFamily.Turtle, (e, a, _) => { e.TurtleView.Clear(); e.Host.Invalidate(); return Args.Done(); },
             aliases: new[] { "CLEARSCREEN" });
 
-        t.Add("SHAPE", 1, "Choose the turtle's shape: 0 arrow, 1 triangle, 2 turtle, 3 dot, 4 car, 5 ball.", "SHAPE 2",
+        t.Add("SHAPE", 1, "Choose the turtle's shape: " + TurtleShapes.Describe() + ". Type VIEWSHAPES to see them.", "SHAPE 2",
             CommandFamily.Turtle, (e, a, _) =>
             {
                 int shape = (int)Math.Round(Args.Number(a, 0, "SHAPE", e.Mode));
-                if (shape is < 0 or > 5)
+                if (shape is < 0 or > TurtleShapes.MaxIndex)
                     throw new LogoException(LogoErrorCode.OutOfRange, ErrorText.OutOfRange("SHAPE", e.Mode),
-                        "SHAPE takes a number from 0 to 5.", subject: "SHAPE");
+                        $"SHAPE takes a number from 0 to {TurtleShapes.MaxIndex} - or type VIEWSHAPES.", subject: "SHAPE");
                 e.Turtle.Shape = shape;
                 e.Host.Invalidate();
                 return Args.Done();
             }, aliases: new[] { "SETSHAPE" });
+
+        // VIEWSHAPES sits beside SHAPE rather than with the other VIEW* command because it answers
+        // the same question: a child who just typed SHAPE 4 wants to know what that looks like, and
+        // HELP SHAPE is where they are already looking. The chart is a viewer painted straight to the
+        // canvas, so nothing enters the scene and their drawing is untouched by looking at this.
+        t.Add("VIEWSHAPES", 0,
+            "Show every turtle shape with its number, drawn the way the turtle wears it.",
+            "VIEWSHAPES",
+            CommandFamily.Turtle, (e, a, _) =>
+            {
+                e.RequestShapes();
+                return Args.Done();
+            }, aliases: new[] { "VIEWSHAPE", "SHAPES" });
     }
 }

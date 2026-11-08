@@ -1,5 +1,6 @@
 using System.Text;
 using MaturinLogo.Core.Interpreter;
+using MaturinLogo.Core.Screen;
 
 namespace MaturinLogo.Core.Primitives;
 
@@ -8,14 +9,32 @@ namespace MaturinLogo.Core.Primitives;
 /// never name a command that is not implemented. Everything is plain uppercase text in 40 columns
 /// because it is shown on the emulated screen and paged with the keyboard.
 /// </summary>
+/// <remarks>
+/// Two rules the screen enforces and an earlier version broke: commands are listed alphabetically
+/// inside each family (a child scanning for <c>FD</c> should not have to read the whole section),
+/// and nothing is ever cut off. A description longer than the column it lives in is wrapped onto
+/// indented continuation rows rather than truncated with an ellipsis, so every row that reaches
+/// the grid is at most <see cref="Width"/> columns and no word is lost.
+/// </remarks>
 public static class QuickReference
 {
     /// <summary>Width of the emulated screen; every line is padded or wrapped to this.</summary>
-    public const int Width = Screen.TextScreen.Cols;
+    public const int Width = TextScreen.Cols;
+
+    /// <summary>
+    /// Columns a command name owns before its description starts. Public because a test asserts
+    /// every name fits it - a command named longer than this would be cut off on the page. The
+    /// longest visible name is nine characters, so there is room to spare.
+    /// </summary>
+    public const int NameColumn = 10;
+
+    /// <summary>Where a wrapped description hangs: the 2-space margin, the name column and the gap
+    /// after it, so a name exactly as wide as its column still cannot run into its own doc.</summary>
+    private const int Lead = NameColumn + 3;
 
     /// <summary>Order the families appear in, matching how a child meets them.</summary>
     private static readonly (CommandFamily Family, string Title)[] FamilyOrder =
-    {
+    [
         (CommandFamily.Turtle, "TURTLE"),
         (CommandFamily.Math, "MATH"),
         (CommandFamily.Words, "WORDS"),
@@ -26,7 +45,7 @@ public static class QuickReference
         (CommandFamily.Output, "PRINTING"),
         (CommandFamily.Screen, "SCREEN"),
         (CommandFamily.System, "LOGO ITSELF"),
-    };
+    ];
 
     /// <summary>One line per screen row, ready to page through with the arrow keys.</summary>
     public static List<string> ReferenceLines(PrimitiveTable table)
@@ -43,54 +62,105 @@ public static class QuickReference
 
         foreach (var (family, title) in FamilyOrder)
         {
-            var primitives = table.InFamily(family).Where(p => !p.Hidden).ToList();
+            var primitives = table.InFamily(family)
+                .Where(p => !p.Hidden)
+                .OrderBy(p => p.Name, StringComparer.Ordinal)
+                .ToList();
             if (primitives.Count == 0) continue;
 
             lines.Add("");
-            lines.Add(title + " " + new string('=', Math.Max(0, Width - title.Length - 1)));
+            lines.Add(Header(title));
 
             // A name index first: a child scanning for FD finds it faster than in prose.
-            foreach (var line in Wrap(string.Join("  ", primitives.Select(p => p.Name)), Width, "  "))
-                lines.Add(line);
+            foreach (string row in TextWrap.Wrap(string.Join("  ", primitives.Select(p => p.Name)), Width, "  "))
+                lines.Add(row);
 
+            lines.Add("");
             foreach (var primitive in primitives)
-            {
-                lines.Add("  " + Trim(primitive.Name, 12) + Shorten(primitive.Doc, Width - 14));
-                if (primitive.Example.Length > 0)
-                    lines.Add("  " + new string(' ', 12) + Shorten("e.g. " + primitive.Example, Width - 14));
-            }
+                Entry(lines, primitive.Name, primitive.Doc, primitive.Example);
         }
 
         var keywords = table.Keywords;
         if (keywords.Count > 0)
         {
             lines.Add("");
-            lines.Add("MAKING YOUR OWN COMMANDS " + new string('=', Math.Max(0, Width - 25)));
-            foreach (var keyword in keywords)
-            {
-                lines.Add("  " + Trim(keyword.Name, 12) + Shorten(keyword.Doc, Width - 14));
-                if (keyword.Example.Length > 0)
-                    lines.Add("  " + new string(' ', 12) + Shorten("e.g. " + keyword.Example, Width - 14));
-            }
+            lines.Add(Header("MAKING YOUR OWN COMMANDS"));
+            foreach (var keyword in keywords.OrderBy(k => k.Name, StringComparer.Ordinal))
+                Entry(lines, keyword.Name, keyword.Doc, keyword.Example);
         }
 
         lines.Add("");
         lines.Add(new string('-', Width));
-        // Every key line is written to fit 40 columns exactly; the reference is paged on the
-        // emulated screen, so a line wider than the grid would look broken.
         lines.Add("KEYS:");
-        lines.Add("  ALT-? HELP    ALT-M MODE");
-        lines.Add("  ALT-S SAVE    ALT-L SESSIONS");
-        lines.Add("  ALT-D SAVE TO FILE");
-        lines.Add("  ALT-E EDITOR  ALT-I INFO");
-        lines.Add("  ALT-G GREEN/AMBER  ALT-C CRT");
-        lines.Add("  ALT-T TEXT    ALT-O OPEN FILE");
-        lines.Add("  ESC CLOSES OR STOPS");
+        foreach (string row in KeyLines()) lines.Add("  " + row);
         lines.Add("");
         lines.Add(Center(LogoInfo.HomageLines[0]));
         lines.Add(Center(LogoInfo.HomageLines[1]));
 
         return lines;
+    }
+
+    /// <summary>
+    /// The Alt keys, two per row, for the quick reference and the INFO dashboard to share. Each
+    /// half is padded to a fixed width so the columns line up whatever the key text says, and two
+    /// halves plus the margin cannot exceed the screen.
+    /// </summary>
+    public static IEnumerable<string> KeyLines()
+    {
+        string[] keys =
+        [
+            "ALT-? HELP",
+            "ALT-, SETTINGS",
+            "ALT-M MODE",
+            "ALT-G COLOR",
+            "ALT-C CRT",
+            "ALT-I INFO",
+            "ALT-V COLOURS",
+            "ALT-W SHAPES",
+            "ALT-L FILES",
+            "ALT-S SAVE",
+            "ALT-D DOWNLOAD",
+            "ALT-O OPEN FILE",
+            "ALT-E EDITOR",
+            "ALT-T TEXT/GRAPH",
+            "ALT-B BREAK",
+            "ESC CLOSES OR STOPS",
+        ];
+
+        const int column = 17;
+        for (int i = 0; i < keys.Length; i += 2)
+        {
+            string left = TextWrap.Column(keys[i], column);
+            string right = i + 1 < keys.Length ? keys[i + 1] : "";
+            yield return (left + right).TrimEnd();
+        }
+    }
+
+    /// <summary>A section title with its rule filling the rest of the row.</summary>
+    private static string Header(string title) =>
+        title + " " + new string('=', Math.Max(0, Width - title.Length - 1));
+
+    /// <summary>
+    /// Emit one entry: the name in its own column and the description wrapped into the space beside
+    /// it, with the overflow hung under the first row rather than hard against the left edge.
+    /// </summary>
+    private static void Entry(List<string> lines, string name, string doc, string example)
+    {
+        Describe(lines, "  " + TextWrap.Column(name, NameColumn + 1), doc);
+        if (example.Length > 0)
+            Describe(lines, new string(' ', Lead), "e.g. " + example);
+    }
+
+    /// <summary>
+    /// Emit one entry: the leading text in its own column and the description wrapped into the
+    /// space beside it, with the overflow hung under the first row rather than hard against the
+    /// left edge.
+    /// </summary>
+    private static void Describe(List<string> lines, string lead, string text)
+    {
+        string continuation = new string(' ', Lead);
+        foreach (string row in TextWrap.WrapIndented(text, Width, lead, continuation))
+            lines.Add(row.TrimEnd());
     }
 
     /// <summary>The text HELP writes for one topic: a command, a family, or ALL.</summary>
@@ -124,7 +194,7 @@ public static class QuickReference
         foreach (var (family, title) in FamilyOrder)
         {
             if (!string.Equals(title, topic, StringComparison.OrdinalIgnoreCase)) continue;
-            var names = table.InFamily(family).Select(p => p.Name);
+            var names = table.InFamily(family).Select(p => p.Name).OrderBy(n => n, StringComparer.Ordinal);
             sb.Append(title).Append(": ").Append(string.Join(", ", names));
             return sb.ToString();
         }
@@ -151,39 +221,12 @@ public static class QuickReference
         var procedures = workspace.ProcedureNames();
 
         if (variables.Count == 0) lines.Add("NO VARIABLES YET");
-        else lines.AddRange(Wrap("VARIABLES: " + string.Join(" ", variables), Width, ", "));
+        else lines.AddRange(TextWrap.Wrap("VARIABLES: " + string.Join(" ", variables), Width, " "));
 
         if (procedures.Count == 0) lines.Add("NO PROCEDURES YET");
-        else lines.AddRange(Wrap("PROCEDURES: " + string.Join(" ", procedures), Width, ", "));
+        else lines.AddRange(TextWrap.Wrap("PROCEDURES: " + string.Join(" ", procedures), Width, " "));
         return lines;
     }
 
-    private static string Center(string text) => text.Length >= Width
-        ? text.Substring(0, Width)
-        : new string(' ', (Width - text.Length) / 2) + text;
-
-    private static string Trim(string text, int width) =>
-        text.Length >= width ? text.Substring(0, width) : text + new string(' ', width - text.Length);
-
-    private static string Shorten(string text, int width) =>
-        text.Length <= width ? text : text.Substring(0, Math.Max(0, width - 1)) + "\u2026";
-
-    /// <summary>Break a long run of words onto several lines no wider than the screen.</summary>
-    private static List<string> Wrap(string text, int width, string separator)
-    {
-        var result = new List<string>();
-        var current = new StringBuilder();
-        foreach (var word in text.Split(separator, StringSplitOptions.RemoveEmptyEntries))
-        {
-            string piece = word + separator;
-            if (current.Length + piece.Length > width && current.Length > 0)
-            {
-                result.Add(current.ToString().TrimEnd());
-                current.Clear();
-            }
-            current.Append(piece);
-        }
-        if (current.Length > 0) result.Add(current.ToString().TrimEnd());
-        return result;
-    }
+    private static string Center(string text) => TextWrap.Center(text, Width);
 }

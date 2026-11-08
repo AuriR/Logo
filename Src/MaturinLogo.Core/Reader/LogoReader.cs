@@ -160,6 +160,31 @@ public static class LogoReader
     private static bool IsDelimiter(char c) =>
         char.IsWhiteSpace(c) || c is '[' or ']' or '(' or ')' or '"' or ';' or '|';
 
+    /// <summary>Longest name Logo accepts, so a runaway word cannot fill the workspace dictionary.</summary>
+    public const int MaxNameLength = 64;
+
+    /// <summary>
+    /// True when <paramref name="name"/> is something a child may put on a procedure or a variable:
+    /// letters, digits and underscore, one to <see cref="MaxNameLength"/> of them.
+    /// </summary>
+    /// <remarks>
+    /// The reader stops a word at a space or a bracket and nothing else, so before this check
+    /// <c>TO SQUARE:</c> quietly defined a procedure literally named <c>SQUARE:</c> - which could
+    /// then never be called, because <c>SQUARE:</c> at the listener reads as a name plus a colon.
+    /// Punctuation names are a trap: they look like they worked, and the child meets the failure
+    /// later, in a program that "should" run. Real Apple Logo was more generous here, but this is
+    /// a teaching machine and a clear refusal beats a name that silently misfires.
+    /// </remarks>
+    public static bool IsValidName(string? name)
+    {
+        if (string.IsNullOrEmpty(name) || name.Length > MaxNameLength) return false;
+
+        foreach (char c in name)
+            if (!(char.IsAsciiLetter(c) || char.IsAsciiDigit(c) || c == '_')) return false;
+
+        return true;
+    }
+
     /// <summary>
     /// Recognises decimal numbers (with sign, point and exponent) and Terrapin's radix forms
     /// <c>#B</c>inary, <c>#O</c>ctal, <c>#D</c>ecimal and <c>#H</c>ex.

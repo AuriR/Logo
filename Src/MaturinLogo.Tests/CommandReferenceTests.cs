@@ -32,6 +32,12 @@ public class CommandReferenceTests
     /// The reference region of the doc, between its own heading and the next section. Scoped so a
     /// backticked cell in the keyboard map or the glossary is never mistaken for a command row.
     /// </summary>
+    /// <remarks>
+    /// The sections are found by title rather than by number, because inserting a section in the
+    /// middle of this document used to mean editing the test as well - and a doc test that has to be
+    /// updated to match the document it is checking is a doc test that quietly passes while the
+    /// region it reads is somewhere else entirely.
+    /// </remarks>
     private static string ReferenceRegion()
     {
         string path = Path.Combine(AppContext.BaseDirectory, "Architecture.md");
@@ -40,13 +46,19 @@ public class CommandReferenceTests
             "or renamed, fix the Content Include in MaturinLogo.Tests.csproj.");
 
         string text = File.ReadAllText(path);
-        int start = text.IndexOf("## 14. Command reference", StringComparison.Ordinal);
-        Assert.True(start >= 0, "the doc has no '## 14. Command reference' section");
+        return Region(text, "Command reference", "Testing");
+    }
 
-        int end = text.IndexOf("## 15. Testing", start, StringComparison.Ordinal);
-        Assert.True(end > start, "the command reference section is not terminated before '## 15. Testing'");
+    /// <summary>The numbered section named <paramref name="title"/>, up to the section named <paramref name="next"/>.</summary>
+    private static string Region(string text, string title, string next)
+    {
+        Match start = Regex.Match(text, @"(?m)^## \d+\. " + Regex.Escape(title));
+        Assert.True(start.Success, $"the doc has no '{title}' section");
 
-        return text.Substring(start, end - start);
+        Match after = Regex.Match(text.Substring(start.Index + start.Length), @"(?m)^## \d+\. " + Regex.Escape(next));
+        Assert.True(after.Success, $"the '{title}' section is not terminated before '{next}'");
+
+        return text.Substring(start.Index, start.Length + after.Index);
     }
 
     /// <summary>First backticked token of a table row, or null when the line is not a command row.</summary>

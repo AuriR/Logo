@@ -41,6 +41,18 @@
         _machine.AppendGraphicsFunc = async items => await _js!.InvokeVoidAsync("appendGraphics", items);
         _machine.SetTurtleFunc = async turtle => await _js!.InvokeVoidAsync("setTurtle", turtle);
 
+        // Sound. The browser owns the audio clock and queues notes there, so these calls are fire
+        // and forget: a TOOT must not make Logo wait half a second before running the next command,
+        // and ESC must still break a program that is mid-note.
+        _machine.PlayToneFunc = async (hertz, seconds) =>
+            await _js!.InvokeVoidAsync("playTone", hertz, seconds);
+        _machine.StopTonesFunc = () => _ = SafeStopTonesAsync();
+
+        // The operating system's reduce-motion setting is the one speed control the child cannot
+        // reach from the keyboard, so the browser reads it and hands it over - the current value
+        // now, and later changes through the callback, once nothing else is in flight.
+        _machine.ReducedMotion = await _js.InvokeAsync<bool>("watchReducedMotion", _selfRef);
+
         _machine.RenderRequested += QueueRender;
 
         // A Logo fault must reach the developer console and the screen. The handler is fire and
@@ -71,6 +83,18 @@
         }
     }
 
+    private async Task SafeStopTonesAsync()
+    {
+        try
+        {
+            if (_js is not null) await _js.InvokeVoidAsync("stopTones");
+        }
+        catch
+        {
+            // Breaking a program is more important than silencing a note that outlived it.
+        }
+    }
+
     /// <summary>
     /// Coalesce repaint requests: a program that writes 40 characters fires the screen's Changed
     /// event 40 times, and Blazor only needs the last one. Rendering happens on the sync context,
@@ -93,6 +117,13 @@
     /// <summary>Called from the browser's keydown handler with one key token.</summary>
     [JSInvokable]
     public void OnKey(string token) => _machine.HandleKey(token);
+
+    /// <summary>
+    /// Called when the browser reports the operating system's reduce-motion setting, at start-up
+    /// and whenever it changes. Logo then ignores SETSPEED and draws instantly.
+    /// </summary>
+    [JSInvokable]
+    public void OnReducedMotion(bool reduced) => _machine.ReducedMotion = reduced;
 
     public void Dispose()
     {

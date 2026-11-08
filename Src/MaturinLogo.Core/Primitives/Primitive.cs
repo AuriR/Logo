@@ -225,6 +225,7 @@ public sealed class PrimitiveTable
         OutputPrimitives.Register(table);
         ScreenPrimitives.Register(table);
         SystemPrimitives.Register(table);
+        SoundPrimitives.Register(table);
         return table;
     }
 }

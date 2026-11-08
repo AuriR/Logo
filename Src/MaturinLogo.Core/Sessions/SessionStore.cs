@@ -100,6 +100,26 @@ public sealed class SessionStore
         public string Mode { get; set; } = "EASY";
 
         /// <summary>
+        /// Whether Logo makes a sound. Defaults to on, and a store written before TOOT existed
+        /// keeps it on: a missing field is not a child asking for silence.
+        /// </summary>
+        public bool SoundEnabled { get; set; } = true;
+
+        /// <summary>
+        /// Drawing speed, 25 to 100, remembered between visits. Zero means "never chosen", which is
+        /// what an older store deserialises to; <see cref="LogoMachine.StartAsync"/> then falls
+        /// back to the fastest setting rather than to a slow draw nobody asked for.
+        /// </summary>
+        public int Speed { get; set; }
+
+        /// <summary>
+        /// The last version whose What's New the child has read. When it is not the running
+        /// version, the splash offers WHAT'S NEW in bright text - so a release is announced once
+        /// rather than on every visit.
+        /// </summary>
+        public string WhatsNewVersion { get; set; } = "";
+
+        /// <summary>
         /// The highest SESSIONn number ever handed out, so a name a child deletes is never issued
         /// again. See SessionNaming.NextName for why counting live sessions is not enough.
         /// </summary>

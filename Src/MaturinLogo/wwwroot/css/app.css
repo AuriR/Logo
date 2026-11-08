@@ -182,6 +182,17 @@ html.crt-on .ml-screen::after {
     100% { background-position: 0 -4px, 0 0; }
 }
 
+/* Respect the operating system's reduce-motion setting. The scanline crawl is decoration, and a
+   user who asked every application to stop moving should not get it anyway. interop.js reads the
+   same query and makes the turtle snap instead of gliding; this covers the parts that are pure CSS.
+   The blinking cursor is left alone - it is the machine's "where am I" indicator, not an effect,
+   and removing it would make the terminal harder to use rather than easier. */
+@media (prefers-reduced-motion: reduce) {
+    html.crt-on .ml-screen::after {
+        animation: none;
+    }
+}
+
 /* Room-wide vignette so the screen reads as a tube sitting in the dark. */
 .ml-container::before {
     content: "";

@@ -97,7 +97,7 @@ public static class SystemPrimitives
 public static class LogoInfo
 {
     public const int Major = 1;
-    public const int Minor = 0;
+    public const int Minor = 2;
     public const string Product = "MATURIN LOGO";
 
     /// <summary>Display version, kept in one place so splash, dashboard and VERSION agree.</summary>

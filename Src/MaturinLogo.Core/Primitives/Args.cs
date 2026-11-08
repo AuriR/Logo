@@ -59,6 +59,42 @@ public static class Args
                 $"{name} needs a name like {name.ToUpperInvariant()}SAMPLE, not a list.", subject: name),
         };
 
+    /// <summary>
+    /// A name the child puts a value on: same acceptance as <see cref="Name"/>, but it must also be
+    /// spellable, so <c>MAKE "SCORE: 5</c> is refused instead of storing something that is awkward
+    /// to read back.
+    /// <para>
+    /// A number is still let through untouched - Logo allows <c>MAKE 1 "X</c>, and refusing it here
+    /// would be a language change nobody asked for.
+    /// </para>
+    /// </summary>
+    public static string Variable(IReadOnlyList<LogoValue> args, int index, string name, LogoMode mode)
+    {
+        string value = Name(args, index, name, mode);
+        if (args[index].Kind == LogoKind.Number) return value;
+
+        if (!Reader.LogoReader.IsValidName(value))
+            throw new LogoException(LogoErrorCode.BadName,
+                ErrorText.BadName(value, mode), ErrorText.HintBadName("variable name", mode), subject: value);
+
+        return value;
+    }
+
+    /// <summary>
+    /// A name a value hangs off - the thing and the property in PUT, GET and REMPROP.
+    /// </summary>
+    public static string PropertyName(IReadOnlyList<LogoValue> args, int index, string name, LogoMode mode)
+    {
+        string value = Name(args, index, name, mode);
+        if (args[index].Kind == LogoKind.Number) return value;
+
+        if (!Reader.LogoReader.IsValidName(value))
+            throw new LogoException(LogoErrorCode.BadName,
+                ErrorText.BadName(value, mode), ErrorText.HintBadName("property name", mode), subject: value);
+
+        return value;
+    }
+
     public static IReadOnlyList<LogoValue> List(IReadOnlyList<LogoValue> args, int index, string name, LogoMode mode)
     {
         var value = args[index];
@@ -96,9 +132,26 @@ public static class Args
     {
         if (Turtle.ApplePalette.TryResolve(args[index], out int color)) return color;
         throw new LogoException(LogoErrorCode.OutOfRange,
-            $"{name} needs a colour from 0 to 15",
-            "0 is black, 1 green, 2 white, 3 purple, 4 orange, 5 blue. Type SETPENCOLOR 4 to try orange.",
+            $"{name} needs a colour from 0 to {Turtle.ApplePalette.Count - 1}",
+            "0 black, 1 green, 2 white, 3 purple, 4 orange, 5 blue - or a name like SETPC \"RED.",
             subject: name);
+    }
+
+    /// <summary>
+    /// A drawing speed, clamped to Logo's 25-100 range. Out of range is said as the range rather
+    /// than as a bare refusal, because a child who typed 5 meant "slow" and needs to know that 25
+    /// is where slow starts.
+    /// </summary>
+    public static int Speed(IReadOnlyList<LogoValue> args, int index, string name, LogoMode mode)
+    {
+        double raw = Number(args, index, name, mode);
+        int speed = (int)Math.Round(raw);
+        if (speed < Interpreter.Engine.MinSpeed || speed > Interpreter.Engine.MaxSpeed)
+            throw new LogoException(LogoErrorCode.OutOfRange,
+                ErrorText.OutOfRange(name, mode),
+                $"{name} takes a number from {Interpreter.Engine.MinSpeed} to {Interpreter.Engine.MaxSpeed}.",
+                subject: name);
+        return speed;
     }
 
     /// <summary>An index into a list, converted from Logo's 1-based counting.</summary>

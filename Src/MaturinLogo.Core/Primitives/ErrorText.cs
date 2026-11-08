@@ -59,6 +59,19 @@ public static class ErrorText
         ? $"{name} is part of Logo itself, so it cannot be a procedure name. Try a different name."
         : $"{name} IS A LOGO WORD";
 
+    /// <summary>
+    /// Refusal for a name with punctuation or a space in it. Says what is allowed rather than only
+    /// what was wrong, because a child who typed <c>TO SQUARE:</c> genuinely believes they named a
+    /// procedure SQUARE.
+    /// </summary>
+    public static string BadName(string name, LogoMode mode) => mode == LogoMode.Easy
+        ? $"{name} is not a name I can use"
+        : $"BAD NAME {name}";
+
+    public static string HintBadName(string what, LogoMode mode) => mode == LogoMode.Easy
+        ? $"A {what} uses letters, numbers and underscore only - no spaces or punctuation."
+        : $"A {what} IS LETTERS NUMBERS _ ONLY";
+
     public static string Runaway(LogoMode mode) => mode == LogoMode.Easy
         ? "That program keeps calling itself over and over"
         : "RECURSION TOO DEEP";

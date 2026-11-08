@@ -31,6 +31,16 @@ public interface IEngineHost
 
     /// <summary>Ask the host to repaint the screen and the graphics page.</summary>
     void Invalidate();
+
+    /// <summary>
+    /// Play a tone for the child to hear. Returns as soon as the tone is queued rather than when it
+    /// finishes: a program that waited out every note could not be broken with ESC, and a spiral
+    /// with a beep in it would crawl.
+    /// </summary>
+    Task PlayToneAsync(double hertz, double seconds);
+
+    /// <summary>Forget every tone still waiting, which is what turning sound off means.</summary>
+    void StopTones();
 }
 
 /// <summary>Host for unit tests and headless runs: never yields, never breaks, no typed input.</summary>
@@ -42,6 +52,8 @@ public sealed class NullHost : IEngineHost
     public bool IsBreakRequested() => false;
     public Task<string?> ReadLineAsync() => Task.FromResult<string?>(null);
     public void Invalidate() { }
+    public Task PlayToneAsync(double hertz, double seconds) => Task.CompletedTask;
+    public void StopTones() { }
 }
 
 /// <summary>A name binding frame. Logo scopes dynamically, so Parent is the caller's frame.</summary>
@@ -207,6 +219,70 @@ public sealed class Engine
     public void RequestBye() => ByeRequested = true;
 
     public void ClearBye() => ByeRequested = false;
+
+    /// <summary>Set when SETTINGS is typed; the host opens the settings overlay once the line returns.</summary>
+    public bool SettingsRequested { get; private set; }
+
+    public void RequestSettings() => SettingsRequested = true;
+
+    public void ClearSettings() => SettingsRequested = false;
+
+    /// <summary>Set when VIEWCOLORS is typed; the host opens the colour chart once the line returns.</summary>
+    public bool ColorsRequested { get; private set; }
+
+    public void RequestColors() => ColorsRequested = true;
+
+    public void ClearColors() => ColorsRequested = false;
+
+    /// <summary>Set when VIEWSHAPES is typed; the host opens the shape chart once the line returns.</summary>
+    public bool ShapesRequested { get; private set; }
+
+    public void RequestShapes() => ShapesRequested = true;
+
+    public void ClearShapes() => ShapesRequested = false;
+
+    /// <summary>
+    /// How fast a program draws, on Logo's 25-100 scale where 100 is as fast as the machine goes
+    /// and 25 is the slowest useful speed. SETSPEED sets it; the host turns it into a pause per
+    /// animation frame.
+    /// </summary>
+    public int Speed { get; set; } = MaxSpeed;
+
+    /// <summary>Slowest speed SETSPEED accepts; the range the child asked for, 25 to 100.</summary>
+    public const int MinSpeed = 25;
+
+    /// <summary>Fastest speed, which means "no pause at all".</summary>
+    public const int MaxSpeed = 100;
+
+    /// <summary>
+    /// True when Logo may make a sound. Off is for a classroom, a shared computer, and a child who
+    /// does not want to be heard; SETSOUND and the settings screen both reach it, and it is
+    /// remembered with the monitor colour rather than per session.
+    /// </summary>
+    public bool SoundEnabled { get; set; } = true;
+
+    /// <summary>Ask the host for a tone, unless sound is off - which is the one check every caller would otherwise repeat.</summary>
+    public Task PlaySoundAsync(double hertz, double seconds) =>
+        SoundEnabled ? Host.PlayToneAsync(hertz, seconds) : Task.CompletedTask;
+
+    /// <summary>Silence anything queued. Safe to call when nothing is playing.</summary>
+    public void StopSounds() => Host.StopTones();
+
+    /// <summary>
+    /// True when the operating system has been asked to reduce motion, in which case speed is
+    /// ignored and everything draws instantly.
+    /// </summary>
+    /// <remarks>
+    /// This is the accessibility setting a user turned on for every application on their machine,
+    /// and a Logo that animates a spiral over several seconds is exactly the kind of motion they
+    /// asked not to be given. It overrides SETSPEED rather than merely setting a default, because
+    /// the alternative is a child who cannot switch it off from the keyboard.
+    /// </remarks>
+    public bool InstantDraw { get; set; }
+
+    /// <summary>Milliseconds to pause on each animation frame at <paramref name="speed"/>.</summary>
+    public static int FrameDelayMs(int speed) => speed >= MaxSpeed ? 0 : (MaxSpeed - speed) * 6;
+
 
     /// <summary>Work out a single stored value as an expression, used to re-run a loop test.</summary>
     public async Task<LogoValue> EvalOneValueAsync(LogoValue value, Frame env)
@@ -881,6 +957,17 @@ public sealed class Engine
 
         if (TryLookupVariable(name, env, out LogoValue? value)) return value!;
 
+        // TRUE and FALSE are values, not procedures, so `SETCASE FALSE` and `SETSOUND FALSE` mean
+        // what the manual says they mean. Logo prints a boolean as one of those two words, and until
+        // now reading it back as a bare word fell through to "I don't know the name FALSE" - which
+        // made the printed form of a boolean unusable as its own input.
+        //
+        // Last in the chain rather than first, so nothing that used to resolve stops resolving: a
+        // child who defined a procedure named TRUE, or made a variable called FALSE, keeps theirs.
+        // This is the rule that let `MAKE 1 "X` through untouched for the same reason.
+        if (name is "TRUE") return LogoValue.True;
+        if (name is "FALSE") return LogoValue.False;
+
         throw new LogoException(LogoErrorCode.NotAProcedure,
             ErrorText.NotAProcedure(name, Mode),
             ErrorText.HintNotAProcedure(name, Primitives, Workspace), item.Line, name);
@@ -972,6 +1059,14 @@ public sealed class Engine
         if (name.Length == 0)
             throw new LogoException(LogoErrorCode.UnterminatedDefinition, "TO needs a name");
 
+        // A name has to be callable. `TO SQUARE:` used to define a procedure named SQUARE:, which
+        // could then never be run - the listener reads SQUARE: as a name and a colon. Refusing at
+        // definition time tells the child now, instead of leaving a procedure that looks saved and
+        // is unreachable.
+        if (!Reader.LogoReader.IsValidName(name))
+            throw new LogoException(LogoErrorCode.BadName,
+                ErrorText.BadName(name, Mode), ErrorText.HintBadName("procedure name", Mode), subject: name);
+
         // A child cannot redefine Logo's own words - neither the syntactic ones the engine
         // intercepts, nor any primitive. Otherwise TO REPEAT would silently break the language.
         if (PrimitiveTable.IsReserved(name) || Primitives.Contains(name))
@@ -983,6 +1078,10 @@ public sealed class Engine
         while (!stream.AtEnd && stream.Peek().Kind == ItemKind.VarRef)
         {
             var formal = stream.Items[stream.Index++];
+            if (!Reader.LogoReader.IsValidName(formal.Text))
+                throw new LogoException(LogoErrorCode.BadName,
+                    ErrorText.BadName(":" + formal.Text, Mode),
+                    ErrorText.HintBadName("input name", Mode), subject: formal.Text);
             formals.Add(new FormalInput(formal.Text, FormalKind.Required));
         }
 
@@ -993,6 +1092,10 @@ public sealed class Engine
         {
             var group = stream.Items[stream.Index++];
             string formalName = group.Children[0].Text;
+            if (!Reader.LogoReader.IsValidName(formalName))
+                throw new LogoException(LogoErrorCode.BadName,
+                    ErrorText.BadName(":" + formalName, Mode),
+                    ErrorText.HintBadName("input name", Mode), subject: formalName);
             if (group.Children.Count == 2)
                 formals.Add(new FormalInput(formalName, FormalKind.Optional, LogoReader.ToLiteral(group.Children[1])));
             else

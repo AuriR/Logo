@@ -14,6 +14,7 @@ public enum LogoErrorCode
     UnterminatedDefinition,
     AlreadyDefined,
     NotDefined,
+    BadName,
     OutputIgnored,
     NoOutput,
     DivisionByZero,

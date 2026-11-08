@@ -32,8 +32,15 @@
     /// mode has the turtle page configured.</item>
     /// </list>
     /// </remarks>
+    /// <remarks>
+    /// The colour chart is the one other view that owns the canvas rather than the grid: the text
+    /// screen is a single phosphor colour and cannot show red at all, so a chart of the palette has
+    /// to be painted where the turtle paints. The machine asks for every text row while the chart is
+    /// up, which makes the canvas cover the grid completely.
+    /// </remarks>
     private string GraphicsClass =>
-        Model.ScreenKind == AppScreen.Listener && Model.Screen.WindowTop > 0 ? "visible" : "";
+        Model.ScreenKind is AppScreen.Colors or AppScreen.Shapes
+        || (Model.ScreenKind == AppScreen.Listener && Model.Screen.WindowTop > 0) ? "visible" : "";
 
     private string Build()
     {

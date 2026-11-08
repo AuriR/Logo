@@ -57,7 +57,7 @@ public static class Program
         {
             Console.Error.WriteLine(
                 $"{docPath} is missing the generated-block sentinels.\n" +
-                "Wrap the '### <Family>' tables in section 14 with:\n" +
+                "Wrap the '### <Family>' tables in the Command reference section with:\n" +
                 $"  {StartSentinel}\n  {EndSentinel}");
             return 2;
         }
@@ -84,7 +84,10 @@ public static class Program
         Console.WriteLine($"Rewrote the command tables in {docPath}.");
         Console.WriteLine($"  {LogoInfo.Product} {LogoInfo.Version}: " +
             $"{table.All.Count(p => !p.Hidden)} commands, {table.Keywords.Count} syntactic words.");
-        Console.WriteLine("Check the totals stated in the section 14 prose still match, then run the tests.");
+        // Named by section title, not number: this message used to say "section 14", and the section
+        // is now 15. A tool that tells you where to look should not have to be edited every time the
+        // document it points at grows.
+        Console.WriteLine("Check the totals stated in the Command reference prose still match, then run the tests.");
         return 0;
     }
 

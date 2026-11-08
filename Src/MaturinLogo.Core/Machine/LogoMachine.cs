@@ -19,6 +19,11 @@ public enum AppScreen
     Sessions,
     Editor,
     Info,
+    Settings,
+    About,
+    WhatsNew,
+    Colors,
+    Shapes,
 }
 
 /// <summary>
@@ -79,6 +84,16 @@ public sealed class LogoMachine
 
     /// <summary>Release the browser for one frame so a long program cannot freeze the page.</summary>
     public Func<Task>? YieldFrameFunc { get; set; }
+
+    /// <summary>
+    /// Play a tone at <paramref name="hertz"/> for <paramref name="seconds"/>. Returns once the tone
+    /// is queued rather than once it has finished, so a program with a beep in it can still be
+    /// broken with ESC and a spiral does not crawl.
+    /// </summary>
+    public Func<double, double, Task>? PlayToneFunc { get; set; }
+
+    /// <summary>Forget every tone still waiting to sound.</summary>
+    public Action? StopTonesFunc { get; set; }
 
     // ---- session store ---------------------------------------------------------
 
@@ -183,6 +198,8 @@ public sealed class LogoMachine
         Theme = string.Equals(Store.Theme, "amber", StringComparison.OrdinalIgnoreCase) ? "amber" : "green";
         CrtEmulation = Store.CrtEmulation;
         Engine.Mode = ParseMode(Store.Mode);
+        Engine.Speed = Store.Speed is >= Engine.MinSpeed and <= Engine.MaxSpeed ? Store.Speed : Engine.MaxSpeed;
+        Engine.SoundEnabled = Store.SoundEnabled;
         await ApplyThemeAsync();
 
         // A brand-new store has no current name, so open the first session rather than leaving the
@@ -238,6 +255,20 @@ public sealed class LogoMachine
         Say(CrtEmulation ? "CRT EMULATION ON" : "CRT EMULATION OFF");
     }
 
+    /// <summary>
+    /// Turn Logo's sound on or off, for a classroom, a shared computer, or a child who does not want
+    /// to be heard. Switching off also silences the notes already queued, because "off" that lets
+    /// the rest of a tune finish is not off.
+    /// </summary>
+    public void ToggleSound()
+    {
+        Engine.SoundEnabled = !Engine.SoundEnabled;
+        if (!Engine.SoundEnabled) Engine.StopSounds();
+        Store.SoundEnabled = Engine.SoundEnabled;
+        _ = SaveSettingsAsync();
+        Say(Engine.SoundEnabled ? "SOUND ON" : "SOUND OFF");
+    }
+
     public void ToggleMode()
     {
         Engine.Mode = Engine.Mode == LogoMode.Easy ? LogoMode.Advanced : LogoMode.Easy;
@@ -250,9 +281,33 @@ public sealed class LogoMachine
             : "ADVANCED MODE - STRICT ERRORS, EDITOR UNLOCKED");
     }
 
+    /// <summary>
+    /// Set the drawing speed, clamped to Logo's 25-100. The settings screen arrows move it, and
+    /// SETSPEED arrives here through the engine, so both paths persist it the same way.
+    /// </summary>
+    public void SetSpeed(int speed)
+    {
+        Engine.Speed = Math.Clamp(speed, Engine.MinSpeed, Engine.MaxSpeed);
+        Store.Speed = Engine.Speed;
+        _ = SaveSettingsAsync();
+    }
+
+    /// <summary>
+    /// The operating system's reduce-motion setting, reported by the browser. While it is on,
+    /// speed is ignored and everything draws instantly - the child asked every application for
+    /// that, and Logo is not special enough to override it.
+    /// </summary>
+    public bool ReducedMotion
+    {
+        get => Engine.InstantDraw;
+        set => Engine.InstantDraw = value;
+    }
+
     private Task SaveSettingsAsync()
     {
         Store.Mode = Engine.Mode.ToString();
+        Store.Speed = Engine.Speed;
+        Store.SoundEnabled = Engine.SoundEnabled;
         Store.CurrentName = CurrentName;
         return WriteStoreAsync();
     }
@@ -263,7 +318,7 @@ public sealed class LogoMachine
     {
         DiscardOverlay();
         ScreenKind = AppScreen.Splash;
-        SplashArt.Draw(Screen, CurrentName, StorageAvailable);
+        SplashArt.Draw(Screen, CurrentName, StorageAvailable, LogoWhatsNew.IsUnread(Store.WhatsNewVersion));
         RequestRender();
     }
 
@@ -556,9 +611,10 @@ public sealed class LogoMachine
         switch (ScreenKind)
         {
             case AppScreen.Splash:
-                // A few Alt keys still work here, so a child who prefers amber or ADVANCED mode can
-                // choose it before starting. Anything that would open an overlay is refused: the
-                // splash has no transcript to go back to.
+                // A few keys still work here, so a child who prefers amber or ADVANCED mode can
+                // choose it before starting. Everything else starts Logo: the splash is the one
+                // screen whose whole job is "press a key", so a shortcut it does not advertise had
+                // better not exist.
                 if (!SplashKey(token)) EnterLogo();
                 break;
             case AppScreen.Listener: HandleListenerKey(token); break;
@@ -566,6 +622,11 @@ public sealed class LogoMachine
             case AppScreen.Sessions: HandleSessionKey(token); break;
             case AppScreen.Editor: HandleEditorKey(token); break;
             case AppScreen.Info: HandleInfoKey(token); break;
+            case AppScreen.Settings: HandleSettingsKey(token); break;
+            case AppScreen.About: HandleAboutKey(token); break;
+            case AppScreen.WhatsNew: HandleWhatsNewKey(token); break;
+            case AppScreen.Colors:
+            case AppScreen.Shapes: HandleViewerKey(token); break;
         }
     }
 
@@ -598,8 +659,16 @@ public sealed class LogoMachine
     }
 
     /// <summary>
-    /// The Alt keys that are safe from the splash: they change a setting rather than opening a view.
+    /// The Alt keys that are safe from the splash: they change a setting rather than opening a view
+    /// over the child's work. `Alt-,` opens settings, and WHAT'S NEW opens when there is a release
+    /// the child has not read.
     /// </summary>
+    /// <remarks>
+    /// W is only honoured while the splash is actually advertising it, so the screen keeps its
+    /// promise: every key it shows does what it says, and every key it does not show starts Logo.
+    /// About lives under `Alt-,` rather than on a bare letter, because a child pressing A at "PRESS
+    /// ANY KEY" means to start.
+    /// </remarks>
     private bool SplashKey(string token)
     {
         switch (token)
@@ -607,6 +676,8 @@ public sealed class LogoMachine
             case "A-M": ToggleMode(); return true;
             case "A-G": ToggleTheme(); return true;
             case "A-C": ToggleCrt(); return true;
+            case "A-COMMA": ShowSettings(); return true;
+            case "W" when LogoWhatsNew.IsUnread(Store.WhatsNewVersion): ShowWhatsNew(); return true;
             default: return false;
         }
     }
@@ -620,6 +691,9 @@ public sealed class LogoMachine
             case "A-G": ToggleTheme(); return true;
             case "A-C": ToggleCrt(); return true;
             case "A-I": ShowInfo(); return true;
+            case "A-COMMA": ShowSettings(); return true;
+            case "A-V": ShowColors(); return true;
+            case "A-W": ShowShapes(); return true;
             case "A-L": ShowSessions(); return true;
             case "A-S": _ = SaveThenSay("SAVED " + TextSessionName); return true;
             // Ctrl+S is the same save. Browsers open their own page-save dialog for it, so the key
@@ -773,6 +847,9 @@ public sealed class LogoMachine
         IsBusy = true;
         BreakRequested = false;
         Engine.ClearBye();
+        Engine.ClearSettings();
+        Engine.ClearColors();
+        Engine.ClearShapes();
 
         // A program can be started from the editor and the session manager as well as from the
         // prompt, and those paths leave the listener's draft block sitting on rows the program is
@@ -809,6 +886,37 @@ public sealed class LogoMachine
         {
             await SaveAsync();
             ShowSplash();
+            return;
+        }
+
+        // SETTINGS asked for the screen. It opens after everything else has finished - saving and
+        // repainting included - because an overlay stashes whatever is underneath it, and the
+        // transcript has to be complete before it does.
+        if (Engine.SettingsRequested)
+        {
+            Engine.ClearSettings();
+            await SaveAsync();
+            ShowSettings();
+            return;
+        }
+
+        // Same for the colour chart: it opens once the line has finished, so a program that drew
+        // something and then asked to see the palette gets both.
+        if (Engine.ColorsRequested)
+        {
+            Engine.ClearColors();
+            await SaveAsync();
+            ShowColors();
+            return;
+        }
+
+        // ...and the same for the shape chart. Checked after colours, so a line that asks for both
+        // settles on one rather than opening a viewer and immediately replacing it.
+        if (Engine.ShapesRequested)
+        {
+            Engine.ClearShapes();
+            await SaveAsync();
+            ShowShapes();
             return;
         }
 
@@ -875,31 +983,16 @@ public sealed class LogoMachine
             Screen.WriteLine(line, attr);
     }
 
-    private static IEnumerable<string> WrapToScreen(string text)
-    {
-        if (text.Length <= TextScreen.Cols) { yield return text; yield break; }
-
-        int start = 0;
-        while (start < text.Length)
-        {
-            int end = Math.Min(start + TextScreen.Cols, text.Length);
-            if (end < text.Length)
-            {
-                // Break on a space so a word is never split in half.
-                int lastSpace = text.LastIndexOf(' ', end, end - start);
-                if (lastSpace > start) end = lastSpace;
-            }
-
-            yield return text.Substring(start, end - start).TrimEnd();
-            start = end;
-            while (start < text.Length && text[start] == ' ') start++;
-        }
-    }
+    private static IEnumerable<string> WrapToScreen(string text) => TextWrap.Wrap(text, TextScreen.Cols);
 
     public void RequestBreak()
     {
         BreakRequested = true;
         Engine.RequestBreak();
+
+        // A program broken mid-drawing should not keep playing the notes it queued on its way out.
+        // The tones are already scheduled on the browser's audio clock, so nothing else stops them.
+        Engine.StopSounds();
     }
 
     private void CompleteRead(string? text)
@@ -988,7 +1081,9 @@ public sealed class LogoMachine
     /// </summary>
     public async Task ReplayGraphicsAsync()
     {
-        if (ReplayGraphicsFunc is null) return;
+        // While the colour chart owns the canvas it *is* the picture, and a layout change is part of
+        // opening and closing it. Replaying here would wipe the chart mid-gesture.
+        if (ReplayGraphicsFunc is null || _viewerOpen) return;
 
         // In full-text mode there is no picture to show: the text owns every row.
         int textRows = Engine.Layout == EngineLayout.FullText ? TextScreen.Rows : Engine.LowerLines;
@@ -1013,7 +1108,7 @@ public sealed class LogoMachine
     /// <summary>Push the turtle's position, heading, colour and visibility to the canvas.</summary>
     public async Task SetTurtleAsync()
     {
-        if (SetTurtleFunc is null) return;
+        if (SetTurtleFunc is null || _viewerOpen) return;
 
         var turtle = new
         {
@@ -1022,10 +1117,25 @@ public sealed class LogoMachine
             heading = Engine.Turtle.Heading,
             color = Engine.Turtle.PenColor,
             visible = Engine.Turtle.Visible,
+            // Shape and size travel with the turtle: SHAPE and PENSIZE used to change only the
+            // engine's copy, which is why the command ran and nothing on screen moved.
+            shape = Engine.Turtle.Shape,
+            size = Engine.Turtle.PenSize,
+            // How long the browser should take to glide there, so the tween and SETSPEED agree
+            // instead of the canvas guessing. 0 means jump, which is what speed 100 and reduced
+            // motion both mean.
+            ms = Engine.InstantDraw ? 0 : FrameDelayForTween(Engine.Speed),
         };
 
         await SetTurtleFunc.Invoke(JsonSerializer.Serialize(turtle));
     }
+
+    /// <summary>
+    /// Milliseconds the canvas spends moving between two turtle states. A frame's pause is already
+    /// the engine's delay, so the tween is matched to it: at speed 25 the turtle crosses in about a
+    /// quarter of a second, at 100 it does not tween at all.
+    /// </summary>
+    private static int FrameDelayForTween(int speed) => Math.Clamp(Engine.FrameDelayMs(speed) / 2, 0, 240);
 
     /// <summary>
     /// Send only the strokes added since the last call. If items were removed (a CLS or CLEAN) or
@@ -1033,6 +1143,9 @@ public sealed class LogoMachine
     /// </summary>
     public async Task AppendGraphicsAsync()
     {
+        // The chart owns the canvas; strokes from a running program are held until it closes.
+        if (_viewerOpen) return;
+
         int total = Engine.Scene.Items.Count;
 
         // A program that changes the screen colour (SETSCRNCOLOR, or CLEAN, which redraws over the
@@ -1066,39 +1179,27 @@ public sealed class LogoMachine
 
     public void ShowHelp()
     {
-        _helpLines = QuickReference.ReferenceLines(Engine.Primitives);
+        // Wrapped once, here, so the pager's row count is the number of rows the child actually
+        // sees rather than the number of lines the reference happened to be written with.
+        _helpLines = WrapRows(QuickReference.ReferenceLines(Engine.Primitives));
         _helpTop = 0;
         OpenOverlay(AppScreen.Help);
         PaintHelp();
         RequestRender();
     }
 
-    private void PaintHelp()
-    {
-        Screen.Clear();
-        for (int row = 0; row < TextScreen.Rows - 1 && _helpTop + row < _helpLines.Count; row++)
-            Screen.PutLine(row, Fit(_helpLines[_helpTop + row]));
-
-        int last = Math.Min(_helpTop + TextScreen.Rows - 2, _helpLines.Count - 1);
-        Screen.PutLine(TextScreen.Rows - 1, Fit($"{_helpTop + 1}-{last + 1} OF {_helpLines.Count}  ARROWS SCROLL"), CellAttr.Reverse);
-    }
+    private void PaintHelp() => PaintPaged(_helpLines, ref _helpTop);
 
     private void HandleHelpKey(string token)
     {
-        int lastTop = Math.Max(0, _helpLines.Count - (TextScreen.Rows - 1));
-        switch (token)
+        if (ScrollPaged(token, _helpLines, ref _helpTop))
         {
-            case "UP": _helpTop = Math.Max(0, _helpTop - 1); break;
-            case "DOWN": _helpTop = Math.Min(lastTop, _helpTop + 1); break;
-            case "PGUP": _helpTop = Math.Max(0, _helpTop - (TextScreen.Rows - 2)); break;
-            case "PGDN": _helpTop = Math.Min(lastTop, _helpTop + TextScreen.Rows - 2); break;
-            case "HOME": _helpTop = 0; break;
-            case "END": _helpTop = lastTop; break;
-            case "ESC": case "A-?": case "A-Q": case "A-SLASH": case "C-SLASH": CloseOverlay(); return;
-            default: return;
+            PaintHelp();
+            RequestRender();
+            return;
         }
-        PaintHelp();
-        RequestRender();
+
+        if (token is "ESC" or "A-?" or "A-Q" or "A-SLASH" or "C-SLASH") CloseOverlay();
     }
 
     // ---- info dashboard ---------------------------------------------------------
@@ -1118,8 +1219,17 @@ public sealed class LogoMachine
         int row = 3;
         void Line(string label, string value)
         {
-            Screen.Put(row, 3, Fit($"{label}: {value}"));
-            row++;
+            // The label owns its own column and the value wraps into whatever is left inside the
+            // frame - so a long turtle position or a wide session name continues on the next row
+            // rather than painting over the box's right border.
+            Screen.Put(row, 3, label + ":");
+            int valueCol = Math.Min(3 + label.Length + 2, TextScreen.Cols - 12);
+            int room = TextScreen.Cols - 1 - valueCol;
+            var parts = TextWrap.Wrap(value, room);
+            Screen.Put(row, valueCol, parts[0]);
+            for (int i = 1; i < parts.Count && row + i < TextScreen.Rows - 9; i++)
+                Screen.Put(row + i, valueCol, parts[i]);
+            row += Math.Max(1, parts.Count);
         }
 
         Line("FILE", CurrentName);
@@ -1130,18 +1240,543 @@ public sealed class LogoMachine
         Line("PROCEDURES", Engine.Workspace.Procedures.Count.ToString());
         Line("VARIABLES", Engine.Workspace.Globals.Count.ToString());
         Line("STROKES", Engine.Scene.Items.Count.ToString());
+        Line("SPEED", Engine.InstantDraw ? "INSTANT" : Engine.Speed.ToString());
         Line("TURTLE", $"X {Engine.Turtle.X:F0}  Y {Engine.Turtle.Y:F0}  H {Engine.Turtle.Heading:F0}");
         Line("SAVE SPACE", StorageAvailable ? "OK" : "NOT AVAILABLE");
 
-        Screen.Put(15, 3, "ALT-? HELP    ALT-M MODE   ALT-L FILES");
-        Screen.Put(16, 3, "ALT-G COLOR   ALT-C CRT    ALT-D FILE");
-        Screen.Put(17, 3, "ALT-E EDITOR  ALT-T TEXT   ALT-B BREAK");
-        Screen.Put(18, 3, "ALT-O OPEN A .logo FILE");
+        // The key list comes from the same table the quick reference prints, so the two can never
+        // disagree about which keys exist - and neither can exceed the screen.
+        int keyRow = TextScreen.Rows - 2 - QuickReference.KeyLines().Count();
+        foreach (string line in QuickReference.KeyLines())
+        {
+            if (keyRow >= TextScreen.Rows - 2) break;
+            Screen.Put(keyRow, 2, Fit(line), CellAttr.Dim);
+            keyRow++;
+        }
     }
 
     private void HandleInfoKey(string token)
     {
         if (token is "ESC" or "A-I" or "ENTER") CloseOverlay();
+    }
+
+    // ---- settings ---------------------------------------------------------------
+
+    /// <summary>The rows the settings screen offers, in the order it shows them.</summary>
+    private enum Setting
+    {
+        Monitor,
+        Crt,
+        Mode,
+        Speed,
+        Sound,
+        Motion,
+        Colors,
+        Shapes,
+        WhatsNew,
+        About,
+    }
+
+    /// <summary>Which settings row is highlighted, as an index into <see cref="SettingRows"/>.</summary>
+    private int _settingsIndex;
+
+    /// <summary>
+    /// The rows in the order the screen shows them. The separator is not a setting: it is drawn as
+    /// a blank band so the toggles and the pages read as two groups, and the arrows jump over it.
+    /// Keeping the layout in one list is what stops the highlight from landing on the gap.
+    /// </summary>
+    private static readonly (Setting? Value, string Label)[] SettingRows =
+    [
+        (Setting.Monitor, "MONITOR"),
+        (Setting.Crt, "CRT"),
+        (Setting.Mode, "MODE"),
+        (Setting.Speed, "SPEED"),
+        (Setting.Sound, "SOUND"),
+        (Setting.Motion, "REDUCED MOTION"),
+        (null, ""),
+        (Setting.Colors, "COLOUR CHART"),
+        (Setting.Shapes, "SHAPE CHART"),
+        (Setting.WhatsNew, "WHAT'S NEW"),
+        (Setting.About, "ABOUT"),
+    ];
+
+    public void ShowSettings()
+    {
+        _settingsIndex = 0;
+        OpenOverlay(AppScreen.Settings);
+        PaintSettings();
+        RequestRender();
+    }
+
+    private void PaintSettings()
+    {
+        Screen.Clear();
+
+        // A frame around the list rather than the whole screen. A full-height box left six empty
+        // rows under the list, which reads as a broken screen on a grid that cannot scroll.
+        int boxTop = 1;
+        int boxHeight = SettingRows.Length + 4;
+        Screen.DrawBox(boxTop, 0, boxHeight, TextScreen.Cols, "SETTINGS", CellAttr.None);
+
+        string Value(Setting setting) => setting switch
+        {
+            Setting.Monitor => Theme.ToUpperInvariant(),
+            Setting.Crt => CrtEmulation ? "ON" : "OFF",
+            Setting.Mode => Engine.Mode.ToString().ToUpperInvariant(),
+            Setting.Speed => Engine.InstantDraw ? "INSTANT" : $"{Engine.Speed} {SpeedBar(Engine.Speed)}",
+            Setting.Sound => Engine.SoundEnabled ? "ON" : "OFF",
+            Setting.Motion => Engine.InstantDraw ? "ON" : "OFF",
+            Setting.Colors => "OPEN",
+            Setting.Shapes => "OPEN",
+            Setting.WhatsNew => LogoWhatsNew.IsUnread(Store.WhatsNewVersion) ? "READ IT" : $"SEEN {LogoInfo.Version}",
+            _ => LogoInfo.Version,
+        };
+
+        for (int i = 0; i < SettingRows.Length; i++)
+        {
+            int row = boxTop + 2 + i;
+            var (setting, label) = SettingRows[i];
+            if (setting is null) continue;      // the separator band is left as the cleared grid
+
+            bool selected = i == _settingsIndex;
+            // 38 columns written at column 1: the box's borders sit on columns 0 and 39, and a
+            // full-width PutLine would erase them. The highlight still spans the whole row inside
+            // the frame, which is what makes this screen's cursor obvious on a grid with no mouse.
+            string line = (selected ? ">" : " ") + " " + label;
+            string value = Value(setting.Value);
+            if (line.Length + value.Length + 2 > TextScreen.Cols - 2)
+                value = value.Substring(0, Math.Max(0, TextScreen.Cols - 2 - line.Length - 2));
+
+            Screen.Put(row, 1, line.PadRight(TextScreen.Cols - 2 - value.Length) + value,
+                       selected ? CellAttr.Reverse : CellAttr.None);
+        }
+
+        int footer = boxTop + boxHeight + 2;
+        Screen.Put(footer, 2, " UP DOWN CHOOSE", CellAttr.Dim);
+        Screen.Put(footer + 1, 2, " LEFT RIGHT CHANGE", CellAttr.Dim);
+        Screen.Put(footer + 2, 2, " ENTER OPEN OR TOGGLE", CellAttr.Dim);
+        Screen.Put(footer + 3, 2, " ESC BACK", CellAttr.Dim);
+    }
+
+    /// <summary>
+    /// The speed as a bar between two arrows, 25 at the left and 100 at the right, so the child can
+    /// see how far along it is rather than reading a bare number.
+    /// </summary>
+    /// <remarks>
+    /// Plain ASCII on purpose. The bitmap font is the only font the machine has, and a block or
+    /// geometric character it does not carry would show as an empty box - which on a terminal is
+    /// indistinguishable from a bug. The shape is the one the notes asked for: an arrow, a filled
+    /// track, an empty track, and the closing arrow.
+    /// </remarks>
+    public static string SpeedBar(int speed)
+    {
+        const int track = 16;
+        int filled = (int)Math.Round((speed - Engine.MinSpeed) * (double)track / (Engine.MaxSpeed - Engine.MinSpeed));
+        filled = Math.Clamp(filled, 0, track);
+        return "<" + new string('=', filled) + new string('-', track - filled) + ">";
+    }
+
+    private void HandleSettingsKey(string token)
+    {
+        switch (token)
+        {
+            case "UP": Move(-1); return;
+            case "DOWN": Move(+1); return;
+            case "HOME": Select(0); return;
+            case "END": Select(SettingRows.Length - 1); return;
+
+            case "ENTER":
+                // ENTER on a toggle does the same thing as the arrows: a two-value setting has
+                // nowhere sensible to go on Enter, and a child should not have to guess which key
+                // the machine happened to implement.
+                if (OpenOrToggle()) return;      // a page opened; repainting settings would cover it
+                break;
+
+            case "LEFT": case "RIGHT":
+                Adjust(CurrentSetting(), token == "RIGHT" ? +1 : -1);
+                break;
+
+            case "ESC": case "A-COMMA": CloseOverlay(); return;
+            default: return;
+        }
+
+        PaintSettings();
+        RequestRender();
+    }
+
+    /// <summary>Highlighted row's setting; null only for the separator, which the arrows skip.</summary>
+    private Setting? CurrentSetting() => SettingRows[_settingsIndex].Value;
+
+    /// <summary>Move the highlight, skipping the separator so the cursor never lands on a gap.</summary>
+    private void Move(int delta)
+    {
+        int index = _settingsIndex;
+        for (int step = 0; step < SettingRows.Length; step++)
+        {
+            index = (index + delta + SettingRows.Length) % SettingRows.Length;
+            if (SettingRows[index].Value is not null) break;
+        }
+        _settingsIndex = index;
+        PaintSettings();
+        RequestRender();
+    }
+
+    private void Select(int index)
+    {
+        if (SettingRows[index].Value is null) index += 1;
+        _settingsIndex = Math.Clamp(index, 0, SettingRows.Length - 1);
+        PaintSettings();
+        RequestRender();
+    }
+
+    /// <summary>
+    /// ENTER on the highlighted row. Returns true when it opened a page, in which case the caller
+    /// must not repaint - the settings list would be drawn straight back over the page that just
+    /// opened, which is the same bug that once hid the session manager behind the editor.
+    /// </summary>
+    private bool OpenOrToggle()
+    {
+        switch (CurrentSetting())
+        {
+            case Setting.WhatsNew: ShowWhatsNew(); return true;
+            case Setting.About: ShowAbout(); return true;
+            case Setting.Colors: ShowColors(); return true;
+            case Setting.Shapes: ShowShapes(); return true;
+            case Setting.Motion: return false;      // the operating system owns this one
+            case Setting.Speed: Adjust(Setting.Speed, +5); return false;
+            default: ToggleCurrent(); return false;
+        }
+    }
+
+    private void ToggleCurrent()
+    {
+        switch (CurrentSetting())
+        {
+            case Setting.Monitor: ToggleTheme(); break;
+            case Setting.Crt: ToggleCrt(); break;
+            case Setting.Mode: ToggleMode(); break;
+            case Setting.Sound: ToggleSound(); break;
+        }
+    }
+
+    /// <summary>Move one setting by <paramref name="delta"/> steps. Rows that only tell do nothing.</summary>
+    private void Adjust(Setting? setting, int delta)
+    {
+        switch (setting)
+        {
+            case Setting.Monitor: ToggleTheme(); break;
+            case Setting.Crt: ToggleCrt(); break;
+            case Setting.Mode: ToggleMode(); break;
+            case Setting.Sound: ToggleSound(); break;
+            case Setting.Speed:
+                // Stepping wraps between the ends so a child who holds the key down sweeps the
+                // whole range instead of stopping at a wall.
+                int next = Engine.Speed + delta * 5;
+                if (next > Engine.MaxSpeed) next = Engine.MinSpeed;
+                if (next < Engine.MinSpeed) next = Engine.MaxSpeed;
+                SetSpeed(next);
+                break;
+        }
+    }
+
+    // ---- about ------------------------------------------------------------------
+
+    public void ShowAbout()
+    {
+        OpenOverlay(AppScreen.About);
+        SplashArt.DrawAbout(Screen, CurrentName, StorageAvailable);
+        RequestRender();
+    }
+
+    private void HandleAboutKey(string token)
+    {
+        if (token is "ESC" or "ENTER" or "A") CloseOverlay();
+    }
+
+    // ---- the picture viewers: colour chart and shape chart ----------------------------
+
+    /// <summary>
+    /// True while a viewer - the colour chart or the shape chart - owns the canvas. Two things depend
+    /// on it: the picture's own replay and append paths stand down so a running program cannot paint
+    /// over the chart mid-loop, and closing a chart knows it has to put the picture back rather than
+    /// leaving swatches or cards over the child's drawing.
+    /// </summary>
+    /// <remarks>
+    /// One flag for both charts, because a canvas can only show one of them at a time and everything
+    /// that depends on the state - the guards, the close, the discard - is identical. Which chart is
+    /// up is already in <see cref="ScreenKind"/>.
+    /// </remarks>
+    private bool _viewerOpen;
+
+    /// <summary>
+    /// VIEWCOLORS: the palette as the canvas actually draws it, each swatch labelled with its number
+    /// and name.
+    /// </summary>
+    /// <remarks>
+    /// The chart goes on the canvas rather than the text grid because the grid is one phosphor
+    /// colour and cannot show red at all - a colour chart drawn in green on green would be a joke.
+    /// It reuses the replay path rather than adding an interop call: the swatches are sent to the
+    /// same function that draws a spiral, so the browser layer learned one new item kind and nothing
+    /// else.
+    /// <para>
+    /// It is a viewer, not a drawing. Putting the chart in the child's own scene would have saved it
+    /// into the session and exported it into their .logo file, so a downloaded spiral would come
+    /// back with sixteen boxes painted over it.
+    /// </para>
+    /// </remarks>
+    public void ShowColors() =>
+        ShowViewer(AppScreen.Colors, PaintColorsAsync,
+            ColorChart.Headline, ColorChart.TextLines);
+
+    /// <summary>
+    /// VIEWSHAPES: the six turtle shapes, each drawn by the same painter that wears them, with the
+    /// number a child types into SHAPE beside it.
+    /// </summary>
+    public void ShowShapes() =>
+        ShowViewer(AppScreen.Shapes, PaintShapesAsync,
+            ShapeChart.Headline, ShapeChart.TextLines);
+
+    /// <summary>
+    /// Open one of the picture viewers over the current screen and paint it.
+    /// </summary>
+    /// <remarks>
+    /// Both charts need the same three things, which is why they share this: a canvas to draw on, the
+    /// viewer flag that keeps a running program from painting through them, and zero text rows so the
+    /// canvas covers the whole grid and every entry is legible at once. The engine's own layout is
+    /// left alone - the canvas is an opaque rectangle over the grid, so on close the ordinary replay
+    /// puts the child's picture and their text rows back exactly as they were.
+    /// </remarks>
+    private void ShowViewer(AppScreen kind, Func<Task> paint, string headline, Func<IEnumerable<string>> textFallback)
+    {
+        if (ReplayGraphicsFunc is null)
+        {
+            // No canvas to draw on, which in the shipped app cannot happen - a browser always has one.
+            // This is the headless host, and a test, so the rule that matters is that neither chart may
+            // ever open a blank screen: print the same list as text instead. The grid is one phosphor
+            // colour, so a colour list names its entries rather than showing them, but the numbers are
+            // the part a child actually types and those come over perfectly well.
+            //
+            // The list first and the headline last, because a sixteen-entry palette scrolls a four-row
+            // window clean off the top - an instruction printed before it would be the one thing the
+            // child cannot see. Announce rather than Say for the headline, because a chart can be asked
+            // for from the editor, where Say would print into the child's source.
+            foreach (string line in textFallback())
+                Say(line);
+
+            Announce(headline);
+            return;
+        }
+
+        _viewerOpen = true;
+        OpenOverlay(kind);
+        _ = paint();
+        RequestRender();
+    }
+
+    /// <summary>
+    /// Swatches are scene items sent as JSON, but the chart is a viewer rather than a drawing: nothing
+    /// here goes into Engine.Scene, so it is never saved into the session or exported.
+    /// </summary>
+    private async Task PaintColorsAsync()
+    {
+        if (ReplayGraphicsFunc is null) return;
+
+        var payload = ColorChart.Swatches().Select(s => new
+        {
+            kind = "swatch",
+            x1 = s.X,
+            y1 = s.Y,
+            width = s.Width,
+            height = s.Height,
+            color = s.Color,
+            text = s.Text,
+            textcolor = s.TextColor,
+        });
+
+        // Background 0 (black) whatever the child's picture is using: a chart of colours laid over
+        // their own background would compare every swatch against it. No text rows, because the
+        // chart owns every row while it is up.
+        await ReplayGraphicsFunc.Invoke(JsonSerializer.Serialize(payload), 0, 0);
+    }
+
+    /// <summary>
+    /// The shape cards, in the same vocabulary. Each carries the shape index and how long to draw it,
+    /// and the browser paints it with the turtle's own painter - so this chart shows the shapes the
+    /// turtle actually has rather than a second drawing of what someone thinks they look like.
+    /// </summary>
+    private async Task PaintShapesAsync()
+    {
+        if (ReplayGraphicsFunc is null) return;
+
+        var payload = ShapeChart.Cards().Select(c => new
+        {
+            kind = "shape",
+            x1 = c.X,
+            y1 = c.Y,
+            width = c.Width,
+            height = c.Height,
+            shape = c.Shape,
+            shapelength = c.ShapeLength,
+            color = c.Color,
+            text = c.Text,
+            textcolor = c.TextColor,
+            textx = c.TextX,
+            texty = c.TextY,
+        });
+
+        await ReplayGraphicsFunc.Invoke(JsonSerializer.Serialize(payload), 0, 0);
+    }
+
+    /// <summary>
+    /// A viewer owns the keyboard while it is up, so the only keys it answers are the ones that leave
+    /// it or switch to the other chart. Everything else - including Alt-L, Alt-E and Alt-T, which
+    /// would stack another view underneath it or change the view it returns to - is ignored rather
+    /// than half-applied.
+    /// </summary>
+    /// <remarks>
+    /// The three "open a page" keys close the chart <i>and then</i> open their page, because a child
+    /// who presses Alt-, while looking at swatches means settings and not "go back to the listener and
+    /// press it again". Re-dispatching is safe: the chart is closed, so the key goes to the listener's
+    /// own global handling rather than back in here.
+    /// </remarks>
+    private void HandleViewerKey(string token)
+    {
+        switch (token)
+        {
+            case "ESC": case "ENTER":
+                CloseOverlay();
+                return;
+
+            // Alt-V and Alt-W switch between the two charts rather than closing the one you are on,
+            // because a child flipping between "what colour is 9" and "what is shape 4" is doing one
+            // task, not opening and closing screens. Pressing the key of the chart already shown
+            // closes it, which is what a toggle has to do to be discoverable at all.
+            case "A-V":
+                OpenOtherViewer(AppScreen.Colors, PaintColorsAsync,
+                    ColorChart.Headline, ColorChart.TextLines);
+                return;
+
+            case "A-W":
+                OpenOtherViewer(AppScreen.Shapes, PaintShapesAsync,
+                    ShapeChart.Headline, ShapeChart.TextLines);
+                return;
+
+            case "A-I": case "A-COMMA": case "A-?": case "A-Q": case "A-SLASH": case "C-SLASH":
+                // Where the chart will hand the screen back to, read before it closes.
+                AppScreen returningTo = _overlays.Count > 0 ? _overlays.Peek().ReturnTo : AppScreen.Listener;
+                CloseOverlay();
+
+                // Opened from the settings list, the child came *from* that page, so going back is
+                // the whole answer - re-dispatching Alt-, here would close settings as well and drop
+                // them at the listener for a key they pressed once. Only a chart opened at the
+                // listener carries its key forward. The second test is the recursion guard: if the
+                // close did not actually leave a viewer, re-dispatching would call this same handler
+                // with the same token, forever.
+                if (returningTo == AppScreen.Listener
+                    && ScreenKind is not (AppScreen.Colors or AppScreen.Shapes)) HandleKey(token);
+                return;
+        }
+    }
+
+    private void OpenOtherViewer(AppScreen kind, Func<Task> paint, string headline, Func<IEnumerable<string>> textFallback)
+    {
+        if (ScreenKind == kind)
+        {
+            CloseOverlay();
+            return;
+        }
+
+        // Close then open, so the stash underneath stays whatever the first chart was opened from -
+        // a chart reached from settings switches in place and still returns to settings.
+        CloseOverlay();
+        ShowViewer(kind, paint, headline, textFallback);
+    }
+
+    // ---- what's new --------------------------------------------------------------
+
+    private List<string> _whatsNewLines = new();
+    private int _whatsNewTop;
+
+    public void ShowWhatsNew()
+    {
+        // Wrapped here for the same reason the reference is: the pager counts rows, and a row that
+        // overflowed would be counted once and drawn as two.
+        _whatsNewLines = WrapRows(LogoWhatsNew.Lines());
+        _whatsNewTop = 0;
+
+        // Reading the page is what marks the release as seen, so the splash stops offering it.
+        if (!string.Equals(Store.WhatsNewVersion, LogoInfo.Version, StringComparison.OrdinalIgnoreCase))
+        {
+            Store.WhatsNewVersion = LogoInfo.Version;
+            _ = SaveSettingsAsync();
+        }
+
+        OpenOverlay(AppScreen.WhatsNew);
+        PaintWhatsNew();
+        RequestRender();
+    }
+
+    private void PaintWhatsNew()
+    {
+        PaintPaged(_whatsNewLines, ref _whatsNewTop);
+    }
+
+    private void HandleWhatsNewKey(string token)
+    {
+        if (ScrollPaged(token, _whatsNewLines, ref _whatsNewTop))
+        {
+            PaintWhatsNew();
+            RequestRender();
+            return;
+        }
+
+        if (token is "ESC" or "W") CloseOverlay();
+    }
+
+    // ---- paging ------------------------------------------------------------------
+
+    /// <summary>
+    /// Paint a paged overlay: as many rows as fit, then a reverse-video footer saying where the
+    /// child is. Callers hand in rows already wrapped to the grid, which is what
+    /// <see cref="WrapRows"/> is for - a line wider than the screen used to be cut off, and the
+    /// cut-off help text and the clipped session rows were both that.
+    /// </summary>
+    private void PaintPaged(List<string> rows, ref int top)
+    {
+        Screen.Clear();
+
+        int visible = TextScreen.Rows - 1;
+        top = Math.Clamp(top, 0, Math.Max(0, rows.Count - visible));
+        for (int row = 0; row < visible && top + row < rows.Count; row++)
+            Screen.PutLine(row, Fit(rows[top + row]));
+
+        int last = Math.Min(top + visible - 1, rows.Count - 1);
+        Screen.PutLine(TextScreen.Rows - 1, Fit($"{top + 1}-{last + 1} OF {rows.Count}  ARROWS SCROLL"), CellAttr.Reverse);
+    }
+
+    /// <summary>Wrap every line to the screen width, so a paged overlay can never overflow it.</summary>
+    private static List<string> WrapRows(IEnumerable<string> lines)
+    {
+        var rows = new List<string>();
+        foreach (string line in lines) rows.AddRange(WrapToScreen(line));
+        return rows;
+    }
+
+    /// <summary>One of the scroll keys on a paged overlay; false for anything else.</summary>
+    private static bool ScrollPaged(string token, List<string> lines, ref int top)
+    {
+        int visible = TextScreen.Rows - 1;
+        int lastTop = Math.Max(0, lines.Count - visible);
+        switch (token)
+        {
+            case "UP": top = Math.Max(0, top - 1); return true;
+            case "DOWN": top = Math.Min(lastTop, top + 1); return true;
+            case "PGUP": top = Math.Max(0, top - (visible - 1)); return true;
+            case "PGDN": top = Math.Min(lastTop, top + visible - 1); return true;
+            case "HOME": top = 0; return true;
+            case "END": top = lastTop; return true;
+            default: return false;
+        }
     }
 
     // ---- overlay plumbing -------------------------------------------------------
@@ -1189,15 +1824,36 @@ public sealed class LogoMachine
         if (_overlays.Count == 0) return;
 
         StashedScreen stashed = _overlays.Pop();
+
+        // The chart hid the picture behind an opaque canvas, so the picture comes back before the
+        // grid does: leaving it until after the repaint would show the child's drawing one frame
+        // under the swatches.
+        bool wasChart = stashed.ReturnTo is AppScreen.Colors or AppScreen.Shapes || _viewerOpen;
+        if (wasChart) _viewerOpen = false;
+
         Restore(stashed);
         ScreenKind = stashed.ReturnTo;
 
-        // The stashed screen already held the prompt and whatever had been typed, so it is redrawn
-        // rather than prompted again. Writing a fresh prompt here would leave two "> " lines.
-        if (stashed.ReturnTo == AppScreen.Editor) PaintEditor();
-        else PaintInput();
+        // The stashed screen already held the prompt and whatever had been typed, so the listener
+        // is redrawn rather than prompted again. Writing a fresh prompt here would leave two "> "
+        // lines - and the other views have no draft at all, so painting one would put "> " under
+        // the splash turtle or over the settings list.
+        if (stashed.ReturnTo == AppScreen.Listener) PaintInput();
+        else if (stashed.ReturnTo == AppScreen.Editor) PaintEditor();
+        else if (stashed.ReturnTo == AppScreen.Splash)
+            // The splash is repainted rather than restored, because the page just closed may have
+            // changed what it says: reading What's New marks the release as seen, and the offer
+            // would otherwise stay bright on the splash forever.
+            ShowSplash();
+        else if (stashed.ReturnTo == AppScreen.Settings)
+            // Same reason: opening What's New from here marks the release read, and the stashed
+            // copy of the list still says READ IT. Settings is drawn from live state, so it is
+            // repainted rather than trusted to a snapshot that is now a moment out of date.
+            PaintSettings();
 
         RequestRender();
+
+        if (wasChart) _ = ReplayGraphicsAsync();
     }
 
     private void Restore(StashedScreen stashed)
@@ -1221,7 +1877,23 @@ public sealed class LogoMachine
     /// splash, or BYE - because a stashed screen for a view that no longer exists cannot be
     /// returned to.
     /// </summary>
-    private void DiscardOverlay() => _overlays.Clear();
+    /// <remarks>
+    /// A picture viewer is dropped here too, and for the same reason: `_viewerOpen` stands the
+    /// replay, append and turtle paths down, so a viewer discarded without clearing the flag leaves
+    /// the canvas frozen over the child's picture forever - every drawing after that would be made
+    /// and never seen. Unlike <see cref="CloseOverlay"/>, nothing is restored to be looked at, so
+    /// the picture is repainted straight away.
+    /// </remarks>
+    private void DiscardOverlay()
+    {
+        _overlays.Clear();
+
+        if (_viewerOpen)
+        {
+            _viewerOpen = false;
+            _ = ReplayGraphicsAsync();
+        }
+    }
 
     private static string Fit(string text) =>
         text.Length <= TextScreen.Cols ? text : text.Substring(0, TextScreen.Cols);
@@ -1256,8 +1928,15 @@ public sealed class LogoMachine
         {
             LogoSession session = Store.Sessions[i];
             string marker = session.Name == CurrentName ? "*" : " ";
-            string line = $"{marker} {session.Name}  {session.LinesWritten} LINES  {session.UpdatedAt:MM-dd HH:mm}";
-            Screen.PutLine(listStart + i, Fit(line), i == _sessionIndex ? CellAttr.Reverse : CellAttr.None);
+            // Name, then the line count and date right-aligned into the remaining columns. The old
+            // format ran to 41 characters for a two-digit session number, which is how the last
+            // digit of a date disappeared off the right-hand edge.
+            string stats = $"{session.LinesWritten} LINES {session.UpdatedAt:MM-dd}";
+            string line = marker + " " + session.Name;
+            line = line.Length + stats.Length + 1 > TextScreen.Cols
+                ? line.Substring(0, Math.Max(0, TextScreen.Cols - stats.Length - 1)) + " " + stats
+                : line.PadRight(TextScreen.Cols - stats.Length) + stats;
+            Screen.PutLine(listStart + i, line, i == _sessionIndex ? CellAttr.Reverse : CellAttr.None);
         }
 
         int footer = TextScreen.Rows - 2;
@@ -1430,6 +2109,8 @@ public sealed class LogoMachine
         Store.Theme = Theme;
         Store.CrtEmulation = CrtEmulation;
         Store.Mode = Engine.Mode.ToString();
+        Store.Speed = Engine.Speed;
+        Store.SoundEnabled = Engine.SoundEnabled;
 
         await WriteStoreAsync();
     }
@@ -1693,11 +2374,20 @@ public sealed class LogoMachine
     {
         public async Task YieldAsync()
         {
+            // The pause that makes SETSPEED mean something. The engine yields once per slice of
+            // evaluation, so this is the only place a program can be slowed down without changing
+            // how fast it computes. Speed 100 and the system's reduced-motion setting both arrive
+            // as no delay at all.
+            int delay = machine.Engine.InstantDraw ? 0 : Engine.FrameDelayMs(machine.Engine.Speed);
+            if (delay > 0 && machine.BreakRequested) delay = 0;
+
             if (machine.YieldFrameFunc is { } yieldFrame) await yieldFrame();
 
             // Repaint the picture as a program draws it, so REPEAT 4 [FD 100 RT 90] animates
             // instead of appearing all at once when the program finishes.
             await machine.AppendGraphicsAsync();
+
+            if (delay > 0) await Task.Delay(delay);
         }
 
         public bool IsBreakRequested() => machine.BreakRequested;
@@ -1724,5 +2414,10 @@ public sealed class LogoMachine
         }
 
         public void Invalidate() => machine.RequestRender();
+
+        public Task PlayToneAsync(double hertz, double seconds) =>
+            machine.PlayToneFunc is { } play ? play(hertz, seconds) : Task.CompletedTask;
+
+        public void StopTones() => machine.StopTonesFunc?.Invoke();
     }
 }
