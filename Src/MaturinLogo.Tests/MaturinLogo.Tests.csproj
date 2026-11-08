@@ -22,4 +22,15 @@
     <ProjectReference Include="..\MaturinLogo.Core\MaturinLogo.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!--
+      The architecture doc is copied next to the test assembly so CommandReferenceTests can read it.
+      Linking it (rather than walking up out of bin/) keeps the test working whatever the working
+      directory is, and PreserveNewest means the copy is never behind the file being edited.
+    -->
+    <Content Include="..\..\Docs\Architecture.md" Link="Architecture.md">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>
