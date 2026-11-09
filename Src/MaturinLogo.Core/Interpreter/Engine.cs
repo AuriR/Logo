@@ -20,8 +20,11 @@ public enum LogoMode
 /// </summary>
 public interface IEngineHost
 {
-    /// <summary>Give the UI a chance to paint and to notice a break request.</summary>
+    /// <summary>Give the UI a chance to paint, flush graphics, and notice a break request.</summary>
     Task YieldAsync();
+
+    /// <summary>Flush pending graphics changes to the browser without adding speed delay.</summary>
+    Task FlushGraphicsAsync();
 
     /// <summary>True when the child pressed Esc / Alt-B.</summary>
     bool IsBreakRequested();
@@ -49,6 +52,7 @@ public sealed class NullHost : IEngineHost
     public static readonly NullHost Instance = new();
 
     public Task YieldAsync() => Task.CompletedTask;
+    public Task FlushGraphicsAsync() => Task.CompletedTask;
     public bool IsBreakRequested() => false;
     public Task<string?> ReadLineAsync() => Task.FromResult<string?>(null);
     public void Invalidate() { }
@@ -246,7 +250,7 @@ public sealed class Engine
     /// and 25 is the slowest useful speed. SETSPEED sets it; the host turns it into a pause per
     /// animation frame.
     /// </summary>
-    public int Speed { get; set; } = MaxSpeed;
+    public int Speed { get; set; } = 50;
 
     /// <summary>Slowest speed SETSPEED accepts; the range the child asked for, 25 to 100.</summary>
     public const int MinSpeed = 25;
@@ -363,6 +367,20 @@ public sealed class Engine
     public Frame CurrentFrame { get; private set; }
 
     private int _steps;
+
+    /// <summary>
+    /// Set by turtle primitives when they change the scene. When non-zero, StepAsync flushes
+    /// graphics to the browser so changes are visible before the next command runs. This is what
+    /// makes short programs like REPEAT 4 [FD 50 RT 90] animate instead of appearing all at once.
+    /// </summary>
+    private int _pendingGraphics;
+
+    /// <summary>True after the first yield boundary has been reached during this program run.
+    /// Once true, we stop flushing on every graphics change (too expensive for long programs)
+    /// and rely on yield-boundary flushes instead.</summary>
+    private bool _hasYielded;
+
+    public void MarkGraphicsDirty() => _pendingGraphics++;
     private int _depth;
 
     /// <summary>Tail-call jumps made by the current top-level run, bounded by <see cref="MaxTailJumps"/>.</summary>
@@ -411,7 +429,17 @@ public sealed class Engine
         var items = LogoReader.ReadProgram(source, FoldCase);
         LinesWritten += CountSourceLines(source);
         _tailJumps = 0;
-        return await RunStreamAsync(new SourceStream(items), GlobalFrame);
+        ResetGraphicsFlushState();
+        try
+        {
+            return await RunStreamAsync(new SourceStream(items), GlobalFrame);
+        }
+        finally
+        {
+            // Flush any remaining graphics so short programs animate completely.
+            // Swallow flush errors here: a failed flush must not mask the program's real error.
+            try { await FlushPendingGraphicsAsync(); } catch { /* best effort */ }
+        }
     }
 
     /// <summary>Evaluate text as an expression (used by tests and EVAL).</summary>
@@ -452,14 +480,39 @@ public sealed class Engine
 
     private async Task StepAsync()
     {
+        // Two separate concerns: flushing graphics to the browser, and applying the SETSPEED delay.
+        // Before the first yield boundary (short programs), flush on every graphics change so the
+        // child sees each step animate. After that (long programs), only flush at yield boundaries
+        // to avoid the overhead of 60,000+ browser calls for a spiral.
+
+        if (!_hasYielded && _pendingGraphics > 0)
+        {
+            _pendingGraphics = 0;
+            await Host.FlushGraphicsAsync();
+        }
+
         if (_steps++ < StepSlice) return;
         _steps = 0;
+        _hasYielded = true;
         if (BreakRequested || Host.IsBreakRequested())
             throw new LogoException(LogoErrorCode.BreakRequested, "BREAK");
         await Host.YieldAsync();
         if (BreakRequested || Host.IsBreakRequested())
             throw new LogoException(LogoErrorCode.BreakRequested, "BREAK");
     }
+
+    /// <summary>Flush any pending graphics changes. Called when a program finishes so short programs animate.</summary>
+    public async Task FlushPendingGraphicsAsync()
+    {
+        if (_pendingGraphics > 0)
+        {
+            _pendingGraphics = 0;
+            await Host.FlushGraphicsAsync();
+        }
+    }
+
+    /// <summary>Reset the graphics-flush state at the start of a new program run.</summary>
+    public void ResetGraphicsFlushState() => _hasYielded = false;
 
     private static int CountSourceLines(string source)
     {

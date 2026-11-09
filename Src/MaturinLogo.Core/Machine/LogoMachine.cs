@@ -1294,7 +1294,7 @@ public sealed class LogoMachine
         (Setting.Sound, "SOUND"),
         (Setting.Motion, "REDUCED MOTION"),
         (null, ""),
-        (Setting.Colors, "COLOUR CHART"),
+        (Setting.Colors, "COLOR CHART"),
         (Setting.Shapes, "SHAPE CHART"),
         (Setting.WhatsNew, "WHAT'S NEW"),
         (Setting.About, "ABOUT"),
@@ -2389,6 +2389,9 @@ public sealed class LogoMachine
 
             if (delay > 0) await Task.Delay(delay);
         }
+
+        /// <summary>Flush graphics to the browser without applying speed delay.</summary>
+        public async Task FlushGraphicsAsync() => await machine.AppendGraphicsAsync();
 
         public bool IsBreakRequested() => machine.BreakRequested;
 
