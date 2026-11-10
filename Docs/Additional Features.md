@@ -1,35 +1,21 @@
-(the items in this file don't need to be implemented - I'm just tracking my ideas here)
+# Future Feature Planning List
 
-Architecture document
-Localizing - Spanish, Japanese, French
-Demo mode that runs through some timed typing of 10 of the Examples used, looping, with an option to "Press ESC to exit demo mode" (flashing)
-Help system? Menu in the front?
-List of commands / command reference with parameter/help details
-Pre-loaded examples they can insert and instantly love - perhaps via Alt-L ("Learn") or Alt-X ("Examples")
-Add fun 8-bit sounds, togglable in settings
-About screen
-Additional Resources screen
-Exception log that can be downloaded and tell me if exceptions are logged to browser/web tools log
-The Old Way is the Best Way quote?
-Add list of supported commands to Architecture doc
-Support for the sound command TOOT? It exiss in Coleco ADAM SmartLOGO.
-Support for SETSPEED command? We want to see the drawing/animation as part of a "fluid" experience.
-Support for SETSH "set shape" command?
+The items in this file don't need to be implemented - I'm just tracking my ideas here.
 
-A few other changes:
+## Done
 
-- Use 80 column so it's mostly taking up the width of the screen. 40 column seems too small. Is this a massive change? Stop if so and ask me about it. This may fix a bug with Alt-I that I saw where text was being cut off.
+- Architecture document
+- Help system? Menu in the front?
+- List of commands / command reference with parameter/help details
+- About screen
+- Add list of supported commands to Architecture doc
+- Support for the sound command TOOT? It exiss in Coleco ADAM SmartLOGO.
+- Support for SETSPEED command? We want to see the drawing/animation as part of a "fluid" experience.
+- Support for SETSH "set shape" command?
 - Add a menu screen with options: Code (back to editor), Settings, and About. Settings should enable toggling of the CRT, Mode, Language, etc. If it would help, use the Appleworks-like UI we used in the RetroWorks repo.
 - Add speed control slider in Settings (using arrows, like `<------*--->` like a slider), for those who can't stand animation?
 - Commands in each section in HELP should be alphabetized. They shouldn't cut off at the end - word wrap accordingly.
 - Add support for TOOT, SETSPEED, and SETSH (set shape) commands to play sound, control animation speed, and change the turtle shape. These exist on the Coleco ADAM SmartLOGO, but I think were also part of other LOGO implementations.
-
-- Text should come from resource files so we can support multiple languages. English first (default), then add Spanish. We'll ignore the Apple II didn't support some of those special characters, since that shouldn't affect the interpreter (it will be limited like the Apple II). Let me know if that's an issue - stop if so.
-
-Also, the letterboxing is bothering me. 40 column seems too small. Is there a better approach? Perhaps 80 columns? Ask me about it. This may fix a bug with Alt-I that I saw where text was being cut off.
-
-A few bugs I found:
-
 - I was allowed to create a function named "SQUARE:" and I think that should only allow alphanumeric characters.
 - SHAPE command is listed in HELP but doesn't work
 - Text is cut off in ALT-I and HELP but should wrap or be better formatted.
@@ -41,7 +27,21 @@ A few bugs I found:
 - Add a WHAT'S NEW option when loading the application. It should also be available from Settings screen.
 - Add About option in Settings that shows the same text as the start screen.
 
----
+## Remaining
+
+Localizing - Spanish, Japanese, French
+Demo mode that runs through some timed typing of 10 of the Examples used, looping, with an option to "Press ESC to exit demo mode" (flashing)
+Pre-loaded examples they can insert and instantly love - perhaps via Alt-L ("Learn") or Alt-X ("Examples")
+Add fun 8-bit sounds, togglable in settings
+Additional Resources screen
+Exception log that can be downloaded and tell me if exceptions are logged to browser/web tools log
+Text should come from resource files so we can support multiple languages. English first (default), then add Spanish. We'll ignore the Apple II didn't support some of those special characters, since that shouldn't affect the interpreter (it will be limited like the Apple II). Let me know if that's an issue - stop if so.
+10 Examples with basics + animations + explanation and make it look like code is being entered, also available from help screen to view the code, optionally enter the code to run it, with question whether they want to run CLEAN first
+Demo Mode (D at startup, and available from settings), shows off Examples, rotating through them
+Demo Mode should run at speed set to 50.
+Access examples list from ALT-X, with keys 0-9 to insert the appropriate example.
+Should we support saving the way LOGO did, in addition to creating the default .logo file? Perhaps that would be good, so they could save when they want? What are the save commands?
+Plan: Add a tutorial mode, accessible from the main screen by pressing T.
 
 ## Status of the bug list above — shipped in 1.1
 
@@ -80,13 +80,5 @@ library, additional resources, and a downloadable exception log.
 small, and the grid is 40x24 everywhere — the reader, the painter, the sessions format and the
 canvas split. See §17 of Architecture.md.
 
-10 Examples with basics + animations + explanation and make it look like code is being entered, also available from help screen to view the code, optionally enter the code to run it, with question whether they want to run CLEAN first
-Demo Mode (D at startup, and available from settings), shows off Examples, rotating through them
-Demo Mode should run at speed set to 50.
-Access examples list from ALT-X, with keys 0-9 to insert the appropriate example.
-
-Should we support saving the way LOGO did, in addition to creating the default .logo file? Perhaps that would be good, so they could save when they want? What are the save commands?
-
-Plan: Add a tutorial mode, accessible from the main screen by pressing T.
 
 (the items in this file don't need to be implemented - I'm just tracking my ideas here)
