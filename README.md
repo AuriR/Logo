@@ -73,3 +73,8 @@ without a browser. The browser only paints what Core tells it to.
 For the full picture — architecture, the command reference, testing strategy and design rationale —
 see **[Docs/Architecture.md](Docs/Architecture.md)**. It is generated from the same command table that
 runs the language, so it cannot drift out of date with the code.
+
+## License
+
+Maturin Logo is licensed under the [MIT License](LICENSE.md). Free to use, modify and distribute —
+perfect for classrooms, homeschooling and anyone who wants to teach kids how to program.

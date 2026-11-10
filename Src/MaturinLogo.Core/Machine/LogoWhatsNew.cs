@@ -21,6 +21,11 @@ public static class LogoWhatsNew
     /// <summary>The whole history, newest first.</summary>
     public static readonly Entry[] Entries =
     [
+        new("1.3", "2026-11-07",
+        [
+            "THE TURTLE MOVES AT YOUR SPEED. Short programs like REPEAT 4 [FD 50 RT 90] now animate step by step instead of appearing all at once when the program finishes.",
+            "LONG PROGRAMS STAY FAST. COUNTDOWN 5000 and other big loops are not slowed down by the animation fix - only short programs get the visible drawing.",
+        ]),
         new("1.2", "2026-11-07",
         [
             "TOOT MAKES A NOISE. TOOT 440 plays a note, TOOT \"A4 0.5 plays a named one. SETSOUND FALSE turns it off.",

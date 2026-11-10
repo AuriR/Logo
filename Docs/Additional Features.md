@@ -28,20 +28,20 @@ The items in this file don't need to be implemented - I'm just tracking my ideas
 - Add About option in Settings that shows the same text as the start screen.
 
 ## Remaining
-
-Localizing - Spanish, Japanese, French
-Demo mode that runs through some timed typing of 10 of the Examples used, looping, with an option to "Press ESC to exit demo mode" (flashing)
-Pre-loaded examples they can insert and instantly love - perhaps via Alt-L ("Learn") or Alt-X ("Examples")
-Add fun 8-bit sounds, togglable in settings
-Additional Resources screen
-Exception log that can be downloaded and tell me if exceptions are logged to browser/web tools log
-Text should come from resource files so we can support multiple languages. English first (default), then add Spanish. We'll ignore the Apple II didn't support some of those special characters, since that shouldn't affect the interpreter (it will be limited like the Apple II). Let me know if that's an issue - stop if so.
-10 Examples with basics + animations + explanation and make it look like code is being entered, also available from help screen to view the code, optionally enter the code to run it, with question whether they want to run CLEAN first
-Demo Mode (D at startup, and available from settings), shows off Examples, rotating through them
-Demo Mode should run at speed set to 50.
-Access examples list from ALT-X, with keys 0-9 to insert the appropriate example.
-Should we support saving the way LOGO did, in addition to creating the default .logo file? Perhaps that would be good, so they could save when they want? What are the save commands?
-Plan: Add a tutorial mode, accessible from the main screen by pressing T.
+- Favicon
+- Localizing - Spanish, Japanese, French
+- Demo mode that runs through some timed typing of 10 of the Examples used, looping, with an option to "Press ESC to exit demo mode" (flashing)
+- Pre-loaded examples they can insert and instantly love - perhaps via Alt-L ("Learn") or Alt-X ("Examples")
+- Add fun 8-bit sounds, togglable in settings
+- Additional Resources screen
+- Exception log that can be downloaded and tell me if exceptions are logged to browser/web tools log
+- Text should come from resource files so we can support multiple languages. English first (default), then add Spanish. We'll ignore the Apple II didn't support some of those special characters, since that shouldn't affect the interpreter (it will be limited like the Apple II). Let me know if that's an issue - stop if so.
+- 10 Examples with basics + animations + explanation and make it look like code is being entered, also available from help screen to view the code, optionally enter the code to run it, with question whether they want to run CLEAN first
+- Demo Mode (D at startup, and available from settings), shows off Examples, rotating through them
+- Demo Mode should run at speed set to 50.
+- Access examples list from ALT-X, with keys 0-9 to insert the appropriate example.
+- Should we support saving the way LOGO did, in addition to creating the default .logo file? Perhaps that would be good, so they could save when they want? What are the save commands?
+- Plan: Add a tutorial mode, accessible from the main screen by pressing T.
 
 ## Status of the bug list above — shipped in 1.1
 
