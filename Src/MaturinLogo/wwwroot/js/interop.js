@@ -155,7 +155,7 @@ const PALETTE = [
 
 /* The six turtle shapes SHAPE 0-5 selects, drawn below in the same order.
    MaturinLogo.Core/Turtle/TurtleShapes.Names is the list the interpreter validates against. */
-const SHAPES = ['ARROW', 'TRIANGLE', 'TURTLE', 'DOT', 'CAR', 'BALL'];
+const SHAPES = ['ARROW', 'TRIANGLE', 'TURTLE', 'DOT', 'DIAMOND', 'BALL'];
 
 /* The first six palette entries are the real hi-res colours, and only they get the television
    fringe. The extended greys are a modern addition and look wrong with red and blue edges. */
@@ -268,7 +268,7 @@ function drawTurtle(g, t, sx, sy, scale, lenOverride) {
         case 'TRIANGLE': drawTriangle(g, cx, cy, fx, fy, rx, ry, len, wing); break;
         case 'TURTLE': drawShell(g, cx, cy, fx, fy, rx, ry, len); break;
         case 'DOT': drawDot(g, cx, cy, len); break;
-        case 'CAR': drawCar(g, cx, cy, fx, fy, rx, ry, len); break;
+        case 'DIAMOND': drawDiamond(g, cx, cy, fx, fy, rx, ry, len); break;
         case 'BALL': drawBall(g, cx, cy, len); break;
         default: drawArrow(g, cx, cy, fx, fy, rx, ry, len, wing); break;
     }
@@ -344,43 +344,16 @@ function drawDot(g, cx, cy, len) {
     g.fill();
 }
 
-/** A car seen from above: a body, a cabin, and four wheels that turn with the heading. */
-function drawCar(g, cx, cy, fx, fy, rx, ry, len) {
-    const l = len * 1.15, w = len * 0.62;
-
-    // Wheels first, so the body sits over them.
-    g.save();
-    g.fillStyle = '#222222';
-    for (const [a, b] of [[0.6, 1], [0.6, -1], [-0.6, 1], [-0.6, -1]]) {
-        const px = cx + fx * l * a + rx * w * b;
-        const py = cy + fy * l * a + ry * w * b;
-        g.beginPath();
-        g.arc(px, py, len * 0.2, 0, Math.PI * 2);
-        g.fill();
-    }
-    g.restore();
-
-    const corners = [
-        [l, w], [l, -w], [-l, -w], [-l, w],
-    ].map(([a, b]) => [cx + fx * l * a + rx * w * b, cy + fy * l * a + ry * w * b]);
-
-    g.beginPath();
-    g.moveTo(corners[0][0], corners[0][1]);
-    for (let i = 1; i < corners.length; i++) g.lineTo(corners[i][0], corners[i][1]);
-    g.closePath();
-    g.fill();
-
-    // Cabin: a darker block toward the front.
-    g.save();
-    g.globalAlpha *= 0.4;
-    g.fillStyle = '#000000';
-    g.beginPath();
-    g.moveTo(cx + fx * l * 0.2, cy + fy * l * 0.2);
-    g.lineTo(cx + fx * l * 0.75 + rx * w, cy + fy * l * 0.75 + ry * w);
-    g.lineTo(cx + fx * l * 0.75 - rx * w, cy + fy * l * 0.75 - ry * w);
-    g.closePath();
-    g.fill();
-    g.restore();
+/** A four-pointed star: long points forward and back, short points to the sides. */
+function drawDiamond(g, cx, cy, fx, fy, rx, ry, len) {
+    const l = len * 1.0;   // length of the front/back points
+    const w = len * 0.45;  // width of the side points
+    polygon(g, [
+        cx + fx * l, cy + fy * l,           // front point
+        cx + rx * w, cy + ry * w,           // right point
+        cx - fx * l, cy - fy * l,           // back point
+        cx - rx * w, cy - ry * w,           // left point
+    ]);
 }
 
 /** A ball: a circle with a highlight, so it does not read as the DOT shape at small sizes. */

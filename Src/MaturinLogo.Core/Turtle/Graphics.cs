@@ -92,7 +92,7 @@ public static class TurtleShapes
     /// <summary>Shape names in index order, as the reference and the error hint show them.</summary>
     public static readonly string[] Names =
     [
-        "ARROW", "TRIANGLE", "TURTLE", "DOT", "CAR", "BALL",
+        "ARROW", "TRIANGLE", "TURTLE", "DOT", "DIAMOND", "BALL",
     ];
 
     public const int Count = 6;
