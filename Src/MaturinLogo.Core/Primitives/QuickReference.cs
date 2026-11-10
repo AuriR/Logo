@@ -115,7 +115,7 @@ public static class QuickReference
             "ALT-G COLOR",
             "ALT-C CRT",
             "ALT-I INFO",
-            "ALT-V COLOURS",
+            "ALT-V COLORS",
             "ALT-W SHAPES",
             "ALT-L FILES",
             "ALT-S SAVE",

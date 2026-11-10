@@ -125,7 +125,7 @@ public class ColorChartTests
 
         // And from settings, since that is where the row is.
         machine.ShowSettings();
-        GoToSetting(machine, "COLOUR CHART");
+        GoToSetting(machine, "COLOR CHART");
         machine.HandleKey("ENTER");
         Assert.Equal(AppScreen.Colors, machine.ScreenKind);
 
@@ -337,7 +337,7 @@ public class ColorChartTests
         Assert.Contains("VIEWCOLORS", reference, StringComparison.Ordinal);
 
         string keys = string.Join("\n", QuickReference.KeyLines());
-        Assert.Contains("ALT-V COLOURS", keys, StringComparison.Ordinal);
+        Assert.Contains("ALT-V COLORS", keys, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -425,7 +425,7 @@ public class ColorChartTests
         // they pressed once.
         (LogoMachine machine, _) = await MachineHarness.AtListenerAsync();
         machine.ShowSettings();
-        GoToSetting(machine, "COLOUR CHART");
+        GoToSetting(machine, "COLOR CHART");
         machine.HandleKey("ENTER");
         Assert.Equal(AppScreen.Colors, machine.ScreenKind);
 
@@ -450,7 +450,7 @@ public class ColorChartTests
         // Both rows were added for this release. A settings screen missing one is how a feature ends
         // up keyboard-only and unknown.
         string machine = File.ReadAllText(Path.Combine(RepoRoot(), "Src", "MaturinLogo.Core", "Machine", "LogoMachine.cs"));
-        foreach (string row in new[] { "\"SOUND\"", "\"COLOUR CHART\"" })
+        foreach (string row in new[] { "\"SOUND\"", "\"COLOR CHART\"" })
             Assert.Contains(row, machine, StringComparison.Ordinal);
 
         Assert.Contains("case \"A-V\"", machine, StringComparison.Ordinal);

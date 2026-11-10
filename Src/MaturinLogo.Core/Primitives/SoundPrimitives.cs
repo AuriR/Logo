@@ -61,7 +61,8 @@ public static class SoundPrimitives
                 double hertz = Pitch(a[0], "TOOT", e.Mode);
                 double seconds = a.Count > 1 ? Seconds(a[1], "TOOT", e.Mode) : DefaultDuration;
 
-                await e.PlaySoundAsync(hertz, seconds);
+                try { await e.PlaySoundAsync(hertz, seconds); }
+                catch { /* A sound failure must not abort the child's whole program. */ }
                 return LogoValue.None;
             }, variadic: true);
 

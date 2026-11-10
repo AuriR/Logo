@@ -1,3 +1,4 @@
+@namespace MaturinLogo.Components
 @using MaturinLogo.Core.Screen
 @using MaturinLogo.Core.Machine
 
@@ -44,9 +45,11 @@
 
     private string Build()
     {
-        // No caret on the splash: the whole screen is artwork there, and a blinking underscore in
-        // the middle of a turtle reads as a fault rather than as a prompt.
-        bool showCursor = Model.ScreenKind != AppScreen.Splash;
+        // No caret when an overlay or dialog owns the screen: a blinking underscore over the INFO
+        // box's border reads as a fault, and there is no input to accept it at. The listener and
+        // editor are the only screens that take typed input; everything else (splash, help, info,
+        // settings, about, what's new, sessions, colour chart, shape chart) shows none.
+        bool showCursor = Model.ScreenKind == AppScreen.Listener || Model.ScreenKind == AppScreen.Editor;
         (int row, int col) = Model.CaretPosition();
         return ScreenGrid.Build(Model.Screen, row, col, showCursor);
     }

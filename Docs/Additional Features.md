@@ -1,3 +1,5 @@
+(the items in this file don't need to be implemented - I'm just tracking my ideas here)
+
 Architecture document
 Localizing - Spanish, Japanese, French
 Demo mode that runs through some timed typing of 10 of the Examples used, looping, with an option to "Press ESC to exit demo mode" (flashing)
@@ -77,3 +79,14 @@ library, additional resources, and a downloadable exception log.
 80 columns was left alone because the wrapping above fixes the cut-off text that made 40 look too
 small, and the grid is 40x24 everywhere — the reader, the painter, the sessions format and the
 canvas split. See §17 of Architecture.md.
+
+10 Examples with basics + animations + explanation and make it look like code is being entered, also available from help screen to view the code, optionally enter the code to run it, with question whether they want to run CLEAN first
+Demo Mode (D at startup, and available from settings), shows off Examples, rotating through them
+Demo Mode should run at speed set to 50.
+Access examples list from ALT-X, with keys 0-9 to insert the appropriate example.
+
+Should we support saving the way LOGO did, in addition to creating the default .logo file? Perhaps that would be good, so they could save when they want? What are the save commands?
+
+Plan: Add a tutorial mode, accessible from the main screen by pressing T.
+
+(the items in this file don't need to be implemented - I'm just tracking my ideas here)

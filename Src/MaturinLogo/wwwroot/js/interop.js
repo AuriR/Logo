@@ -184,6 +184,10 @@ const gfx = {
     raf: 0,
 };
 
+// TEMP DEBUG - remove before shipping.
+window.__gfx = gfx;
+window.__paintLog = [];
+
 /**
  * Reduce-motion, read from the operating system. When it is on, every tween snaps and the engine
  * is told to draw instantly, because this is a setting the user chose for every application.
@@ -542,28 +546,38 @@ function drawShapeCard(g, c, sx, sy, scale) {
 
 function paint() {
     const g = gfx.ctx;
-    if (!g || !gfx.el) return;
+    if (!g || !gfx.el) { window.__paintLog.push({ fn: 'paint', skip: 'no-ctx' }); return; }
     const w = gfx.el.width, h = gfx.el.height;
 
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.fillStyle = paletteOf(gfx.bg);
     g.fillRect(0, 0, w, h);
+    window.__paintLog.push({ fn: 'paint', w, h, bg: gfx.bg, fill: paletteOf(gfx.bg), items: gfx.items.length });
 
     // Fit 280x192 into the region and keep the aspect ratio, or a circle comes out an ellipse.
     const scale = Math.min(w / HIRES_W, h / HIRES_H);
-    if (!isFinite(scale) || scale <= 0) return;
+    if (!isFinite(scale) || scale <= 0) { window.__paintLog.push({ fn: 'paint', bail: 'scale' }); return; }
     const sx = (w - HIRES_W * scale) / 2;
     const sy = (h - HIRES_H * scale) / 2;
 
-    for (const item of gfx.items) {
-        if (item.kind === 'segment') strokeSegment(g, item, sx, sy, scale);
-        else if (item.kind === 'label') drawLabel(g, item, sx, sy, scale);
-        else if (item.kind === 'swatch') drawSwatch(g, item, sx, sy, scale);
-        else if (item.kind === 'shape') drawShapeCard(g, item, sx, sy, scale);
+    try {
+        for (const item of gfx.items) {
+            if (item.kind === 'segment') strokeSegment(g, item, sx, sy, scale);
+            else if (item.kind === 'label') drawLabel(g, item, sx, sy, scale);
+            else if (item.kind === 'swatch') drawSwatch(g, item, sx, sy, scale);
+            else if (item.kind === 'shape') drawShapeCard(g, item, sx, sy, scale);
+        }
+    } catch (e) {
+        window.__paintLog.push({ fn: 'paint', itemsError: String(e && e.stack || e) });
     }
 
     // The turtle is drawn last so it always sits above the picture it is making.
-    drawTurtle(g, gfx.shown || gfx.turtle, sx, sy, scale);
+    try {
+        drawTurtle(g, gfx.shown || gfx.turtle, sx, sy, scale);
+        window.__paintLog.push({ fn: 'paint', done: true });
+    } catch (e) {
+        window.__paintLog.push({ fn: 'paint', error: String(e && e.stack || e) });
+    }
 }
 
 /**
@@ -651,6 +665,7 @@ export function replayGraphics(itemsJson, background, textRows, gridRows) {
     if (typeof textRows === 'number') gfx.lowerLines = Math.max(0, Math.min(gfx.gridRows, textRows));
     gfx.bg = background | 0;
     gfx.items = itemsJson ? JSON.parse(itemsJson) : [];
+    window.__paintLog.push({ fn: 'replayGraphics', bg: gfx.bg, items: gfx.items.length, textRows, gridRows });
     resizeGraphics();
 }
 

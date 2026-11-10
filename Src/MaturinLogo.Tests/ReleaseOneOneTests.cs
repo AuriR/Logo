@@ -604,7 +604,7 @@ public class ReleaseOneOneTests
         (LogoMachine machine, _) = await MachineHarness.AtListenerAsync();
         machine.ShowSettings();
 
-        GoToSetting(machine, "COLOUR CHART");
+        GoToSetting(machine, "COLOR CHART");
         machine.HandleKey("ENTER");
         Assert.Equal(AppScreen.Colors, machine.ScreenKind);
 
@@ -828,7 +828,7 @@ public class ReleaseOneOneTests
         // tests that added them.
         LogoWhatsNew.Entry entry = LogoWhatsNew.Entries.First(e => e.Version == "1.1");
         string all = string.Join(" ", entry.Lines).ToUpperInvariant();
-        foreach (string topic in new[] { "SHAPE", "COLOUR", "SETSPEED", "SETTINGS", "HELP", "NAME" })
+        foreach (string topic in new[] { "SHAPE", "COLOR", "SETSPEED", "SETTINGS", "HELP", "NAME" })
             Assert.Contains(topic, all, StringComparison.Ordinal);
     }
 

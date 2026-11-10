@@ -85,5 +85,5 @@ public static class ColorChart
     /// switches the grid between text and graphics and is one of the keys a chart deliberately
     /// ignores - a hint that does nothing is worse than no hint.
     /// </summary>
-    public const string Headline = "THE COLOURS - SETPC n - ALT-V SHOWS THEM";
+    public const string Headline = "THE COLORS - SETPC n - ALT-V SHOWS THEM";
 }

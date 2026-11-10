@@ -208,7 +208,7 @@ public class ShapeChartTests
         // because the stash underneath was taken before the first chart opened and is left alone.
         (LogoMachine machine, _) = await MachineHarness.AtListenerAsync();
         machine.ShowSettings();
-        GoToSetting(machine, "COLOUR CHART");
+        GoToSetting(machine, "COLOR CHART");
         machine.HandleKey("ENTER");
         Assert.Equal(AppScreen.Colors, machine.ScreenKind);
 
