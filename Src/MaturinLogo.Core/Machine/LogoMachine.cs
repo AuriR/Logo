@@ -2397,7 +2397,11 @@ public sealed class LogoMachine
         /// </summary>
         public async Task FlushGraphicsAsync()
         {
+            // Append new strokes. This also sends the turtle state when there are new items,
+            // but SHAPE/PENSIZE/ST/HT change the turtle without adding items, so we always
+            // send the turtle state here to be safe.
             await machine.AppendGraphicsAsync();
+            await machine.SetTurtleAsync();
 
             // Pause so the child can see each frame before the next one draws.
             int delay = machine.Engine.InstantDraw ? 0 : Engine.FrameDelayMs(machine.Engine.Speed);

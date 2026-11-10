@@ -107,6 +107,8 @@ public static class TurtlePrimitives
                     throw new LogoException(LogoErrorCode.OutOfRange, ErrorText.OutOfRange("PENSIZE", e.Mode),
                         "PENSIZE takes a number from 1 to 16.", subject: "PENSIZE");
                 e.Turtle.PenSize = size;
+                e.MarkGraphicsDirty();
+                e.Host.Invalidate();
                 return Args.Done();
             }, aliases: new[] { "SETPS" });
 
@@ -153,6 +155,7 @@ public static class TurtlePrimitives
                     throw new LogoException(LogoErrorCode.OutOfRange, ErrorText.OutOfRange("SHAPE", e.Mode),
                         $"SHAPE takes a number from 0 to {TurtleShapes.MaxIndex} - or type VIEWSHAPES.", subject: "SHAPE");
                 e.Turtle.Shape = shape;
+                e.MarkGraphicsDirty();
                 e.Host.Invalidate();
                 return Args.Done();
             }, aliases: new[] { "SETSHAPE" });
