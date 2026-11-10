@@ -2390,8 +2390,20 @@ public sealed class LogoMachine
             if (delay > 0) await Task.Delay(delay);
         }
 
-        /// <summary>Flush graphics to the browser without applying speed delay.</summary>
-        public async Task FlushGraphicsAsync() => await machine.AppendGraphicsAsync();
+        /// <summary>
+        /// Flush graphics to the browser and apply the SETSPEED delay so each frame is visible.
+        /// Only called before the first yield boundary (short programs), where per-frame animation
+        /// matters. Long programs rely on YieldAsync() at slice boundaries instead.
+        /// </summary>
+        public async Task FlushGraphicsAsync()
+        {
+            await machine.AppendGraphicsAsync();
+
+            // Pause so the child can see each frame before the next one draws.
+            int delay = machine.Engine.InstantDraw ? 0 : Engine.FrameDelayMs(machine.Engine.Speed);
+            if (delay > 0 && !machine.BreakRequested)
+                await Task.Delay(delay);
+        }
 
         public bool IsBreakRequested() => machine.BreakRequested;
 
