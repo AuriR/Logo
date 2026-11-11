@@ -26,22 +26,19 @@ The items in this file don't need to be implemented - I'm just tracking my ideas
 - Support more than the 6 colors. Support 16 colors. We're in 2026, it's OK...
 - Add a WHAT'S NEW option when loading the application. It should also be available from Settings screen.
 - Add About option in Settings that shows the same text as the start screen.
+- Favicon
+- Add preview image for site link image
+- Add fun 8-bit sounds, togglable in settings
 
 ## Remaining
-- Favicon
 - Localizing - Spanish, Japanese, French
-- Demo mode that runs through some timed typing of 10 of the Examples used, looping, with an option to "Press ESC to exit demo mode" (flashing)
-- Pre-loaded examples they can insert and instantly love - perhaps via Alt-L ("Learn") or Alt-X ("Examples")
-- Add fun 8-bit sounds, togglable in settings
 - Additional Resources screen
 - Exception log that can be downloaded and tell me if exceptions are logged to browser/web tools log
 - Text should come from resource files so we can support multiple languages. English first (default), then add Spanish. We'll ignore the Apple II didn't support some of those special characters, since that shouldn't affect the interpreter (it will be limited like the Apple II). Let me know if that's an issue - stop if so.
-- 10 Examples with basics + animations + explanation and make it look like code is being entered, also available from help screen to view the code, optionally enter the code to run it, with question whether they want to run CLEAN first
-- Demo Mode (D at startup, and available from settings), shows off Examples, rotating through them
-- Demo Mode should run at speed set to 50.
-- Access examples list from ALT-X, with keys 0-9 to insert the appropriate example.
 - Should we support saving the way LOGO did, in addition to creating the default .logo file? Perhaps that would be good, so they could save when they want? What are the save commands?
 - Plan: Add a tutorial mode, accessible from the main screen by pressing T.
+- Add support for pasting from clipboard, up to 512 characters, would Ctrl-V work?
+- Add "C" for credits from home screen, and it draws, centered, in random colors, with strokes around 20 units in length each, at 75% speed, after clearing the screen: "Maturin\nLogo\nby\nAuri\nRahimzadeh" and then prints to the console: "Web: auri.net Twitter: @Auri - Follow me on LinkedIn\nCode MIT Licensed at: https://github.com/AuriR/Logo" (note the \n are newlines), and then drops the user at the normal programming prompt, then sets the speed to what it was before; Credits also accessible from Settings menu.
 
 ## Status of the bug list above — shipped in 1.1
 
@@ -73,8 +70,22 @@ Three more items from the list above:
 
 `SETSH` was already covered by `SHAPE` in 1.1 — same command, Apple Logo's name for it.
 
-Still open from this list: localisation and resource files, 80 columns, demo mode, an examples
-library, additional resources, and a downloadable exception log.
+## Shipped in 1.4
+
+The examples library and the demo mode that plays them:
+
+| Item | What it became |
+|---|---|
+| Pre-loaded examples (`Alt-X`) | Ten examples a child can insert and run instantly — drawing, `MARY HAD A LITTLE LAMB`, building a function, animation, loops, logic, a flower with parameters, variables, a rainbow loop, and a dancing turtle. Keys 0–9 pick one; the code is typed out on screen character by character, then runs. |
+| Demo mode (attract loop) | Runs through all ten examples with timed typing, looping forever. A flashing "DEMO MODE — PRESS ESC TO EXIT" banner sits across the top of the drawing area while it lasts. The splash screen starts it after 10 idle seconds; Settings offers it too. `ESC` returns to whichever screen started it (splash or settings), and the turtle is put home so a child's first command starts from a known place. |
+| Demo mode runs at speed 50 | The demo pins its own drawing speed, so the pictures animate at a readable pace no matter what the child had set. |
+
+The examples never touch the input line — they draw straight to the grid — and nothing a demo
+example defines (a `TRI`, a `FLOWER`) is saved into the child's session: saves are suppressed for
+the whole time the demo owns the screen, and the workspace is restored when it ends.
+
+Still open from this list: localisation and resource files, 80 columns, additional resources, and
+a downloadable exception log.
 
 80 columns was left alone because the wrapping above fixes the cut-off text that made 40 look too
 small, and the grid is 40x24 everywhere — the reader, the painter, the sessions format and the

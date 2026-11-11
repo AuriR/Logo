@@ -118,6 +118,7 @@ public static class QuickReference
             "ALT-V COLORS",
             "ALT-W SHAPES",
             "ALT-L FILES",
+            "ALT-X EXAMPLES",
             "ALT-S SAVE",
             "ALT-D DOWNLOAD",
             "ALT-O OPEN FILE",

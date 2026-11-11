@@ -21,6 +21,12 @@ public static class LogoWhatsNew
     /// <summary>The whole history, newest first.</summary>
     public static readonly Entry[] Entries =
     [
+        new("1.4", "2026-11-10",
+        [
+            "EXAMPLES. Press ALT-X for ten pre-loaded programs - drawing, a tune, a function, animation, loops, logic, parameters and variables. Pick one with 0-9 and it runs at once.",
+            "DEMO MODE. The splash plays the examples on its own after ten quiet seconds, typing each out and running it in a loop. Press ESC to stop; settings can start it too.",
+            "SHARING. A link to Maturin Logo now carries a picture for social media and chat apps.",
+        ]),
         new("1.3", "2026-11-07",
         [
             "THE TURTLE MOVES AT YOUR SPEED. Short programs like REPEAT 4 [FD 50 RT 90] now animate step by step instead of appearing all at once when the program finishes.",

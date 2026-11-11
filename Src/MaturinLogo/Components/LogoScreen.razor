@@ -40,7 +40,7 @@
     /// up, which makes the canvas cover the grid completely.
     /// </remarks>
     private string GraphicsClass =>
-        Model.ScreenKind is AppScreen.Colors or AppScreen.Shapes
+        Model.ScreenKind is AppScreen.Colors or AppScreen.Shapes or AppScreen.Demo
         || (Model.ScreenKind == AppScreen.Listener && Model.Screen.WindowTop > 0) ? "visible" : "";
 
     private string Build()

@@ -824,7 +824,8 @@ public class MachineTests
         await MachineHarness.SettleAsync(machine);
 
         Assert.False(machine.IsBusy);
-        Assert.Contains("BREAK", MachineHarness.ScreenText(machine));
+        // ESC is a stop request, not an error - no "BREAK" message should appear on screen.
+        Assert.DoesNotContain("BREAK", MachineHarness.ScreenText(machine));
     }
 
     [Fact]
@@ -888,5 +889,210 @@ public class MachineTests
 
         Assert.True(machine.Engine.Workspace.HasProcedure("POLY"));
         Assert.Equal(6, machine.Engine.Scene.Items.Count);
+    }
+
+    // ---- examples (ALT-X) -------------------------------------------------------
+
+    [Fact]
+    public async Task Alt_X_opens_the_examples_page_and_esc_returns_to_the_listener()
+    {
+        (LogoMachine machine, _) = await MachineHarness.AtListenerAsync();
+
+        machine.HandleKey("A-X");
+        Assert.Equal(AppScreen.Examples, machine.ScreenKind);
+        string text = MachineHarness.ScreenText(machine);
+        Assert.Contains("EXAMPLES", text);
+        Assert.Contains("SQUARE", text);
+        Assert.Contains("PICK AND RUN", text);
+
+        machine.HandleKey("ESC");
+        Assert.Equal(AppScreen.Listener, machine.ScreenKind);
+    }
+
+    [Fact]
+    public async Task A_digit_on_the_examples_page_runs_that_example_and_returns_to_the_listener()
+    {
+        (LogoMachine machine, _) = await MachineHarness.AtListenerAsync();
+
+        machine.HandleKey("A-X");
+        machine.HandleKey("0");   // SQUARE: CLEAN REPEAT 4 [FD 50 RT 90]
+
+        Assert.Equal(AppScreen.Listener, machine.ScreenKind);
+        await MachineHarness.SettleAsync(machine);
+
+        // The turtle drew a square and came home; the picture is on the scene.
+        Assert.True(machine.Engine.Scene.Items.Count > 0, "the example should have drawn something");
+    }
+
+    [Fact]
+    public async Task ENTER_on_the_examples_page_runs_the_highlighted_example()
+    {
+        (LogoMachine machine, _) = await MachineHarness.AtListenerAsync();
+
+        machine.HandleKey("A-X");
+        machine.HandleKey("DOWN");   // move the highlight to MARY HAD A LITTLE LAMB
+        machine.HandleKey("ENTER");
+
+        Assert.Equal(AppScreen.Listener, machine.ScreenKind);
+        await MachineHarness.SettleAsync(machine);
+    }
+
+    [Fact]
+    public async Task The_examples_page_is_reachable_from_settings()
+    {
+        (LogoMachine machine, _) = await MachineHarness.AtListenerAsync();
+        GoToSettingRow(machine, "EXAMPLES");
+        machine.HandleKey("ENTER");
+
+        Assert.Equal(AppScreen.Examples, machine.ScreenKind);
+        machine.HandleKey("ESC");
+        // Opened from settings, so ESC goes back to settings - the child is put where they were.
+        Assert.Equal(AppScreen.Settings, machine.ScreenKind);
+    }
+
+    // ---- demo mode --------------------------------------------------------------
+
+    [Fact]
+    public async Task The_demo_types_and_runs_examples_then_esc_returns_to_the_listener()
+    {
+        (LogoMachine machine, _) = await MachineHarness.AtListenerAsync();
+        machine.DemoTypeDelayMs = 1;   // a test does not sit through the show at full speed
+        machine.DemoPauseMs = 1;
+
+        machine.StartDemo();
+        Assert.Equal(AppScreen.Demo, machine.ScreenKind);
+
+        // Give it time to type and run the first example.
+        await MachineHarness.SettleAsync(machine);
+        Assert.Contains("DEMO MODE", MachineHarness.ScreenText(machine));
+
+        machine.HandleKey("ESC");
+        Assert.Equal(AppScreen.Listener, machine.ScreenKind);
+    }
+
+    [Fact]
+    public async Task Esc_in_the_demo_restores_the_settings_screen_when_it_started_there()
+    {
+        // The demo opens as an overlay on top of settings, so ESC puts the child back in settings -
+        // exactly where they were when they started it. (From ALT-X or the splash, the same overlay
+        // stashes that screen instead, and ESC returns there.)
+        (LogoMachine machine, _) = await MachineHarness.AtListenerAsync();
+        GoToSettingRow(machine, "DEMO MODE");
+        machine.HandleKey("ENTER");
+
+        Assert.Equal(AppScreen.Demo, machine.ScreenKind);
+        machine.HandleKey("ESC");
+        Assert.Equal(AppScreen.Settings, machine.ScreenKind);
+    }
+
+    [Fact]
+    public async Task The_demo_does_not_leak_its_procedures_into_the_workspace()
+    {
+        (LogoMachine machine, _) = await MachineHarness.AtListenerAsync();
+        machine.DemoTypeDelayMs = 20;
+
+        // "A FUNCTION" (example two) defines TRI and runs it. RunAsync saves on its way out, so -
+        // without a guard - that save writes TRI into the child's session before the demo restores
+        // the engine. We watch the saved session for exactly that: if TRI ever appears there, the
+        // leak is real. (The in-memory engine never holds it long, because each example's restore
+        // wipes it, so the saved session is the only place to catch it.)
+        machine.StartDemo();
+
+        LogoSession? session = machine.Sessions.FirstOrDefault(s => s.Name == machine.CurrentName);
+        Assert.NotNull(session);
+
+        for (int i = 0; i < 1500 && !session!.Procedures.Any(p => p.Contains("TRI")); i++)
+            await Task.Delay(10);
+
+        machine.HandleKey("ESC");
+        await MachineHarness.SettleAsync(machine);
+
+        // The child's live workspace must not hold the demo's procedures...
+        Assert.False(machine.Engine.Workspace.HasProcedure("TRI"),
+            "the demo's TRI must not survive into the child's workspace");
+
+        // ...and neither may their saved session: a child who opens their work later should not find
+        // a flower or triangle they never drew. This stays clean only because SaveAsync refuses to
+        // persist while the demo owns the screen - the in-memory restore alone is not enough, since
+        // RunAsync's save happens before it.
+        Assert.False(session!.Procedures.Any(p => p.Contains("TRI")),
+            "the demo's TRI must not be persisted into the child's saved session");
+    }
+
+    [Fact]
+    public async Task The_splash_starts_the_demo_after_it_sits_idle()
+    {
+        var machine = new LogoMachine();
+        var browser = new FakeBrowser();
+        browser.Attach(machine);
+        machine.DemoIdleTimeout = TimeSpan.FromMilliseconds(50);   // before StartAsync: the timer starts then
+        await machine.StartAsync();
+
+        Assert.Equal(AppScreen.Splash, machine.ScreenKind);
+        await Task.Delay(200);
+
+        Assert.Equal(AppScreen.Demo, machine.ScreenKind);
+    }
+
+    [Fact]
+    public async Task A_keypress_on_the_splash_keeps_pushing_the_demo_back()
+    {
+        var machine = new LogoMachine();
+        var browser = new FakeBrowser();
+        browser.Attach(machine);
+        machine.DemoIdleTimeout = TimeSpan.FromMilliseconds(150);
+        await machine.StartAsync();
+
+        // A-G toggles the theme and stays on the splash, so it is a tap that restarts the clock
+        // without entering Logo. Three taps, each well before the clock runs out: no demo. The
+        // margins are wide because Task.Delay on Windows resolves to ~15ms, and a tap that lands
+        // after the timer has already fired would start the demo mid-test.
+        for (int i = 0; i < 3; i++)
+        {
+            await Task.Delay(60);
+            machine.HandleKey("A-G");
+            Assert.Equal(AppScreen.Splash, machine.ScreenKind);
+        }
+
+        // ...and once the hand lifts off, it does start.
+        await Task.Delay(400);
+        Assert.Equal(AppScreen.Demo, machine.ScreenKind);
+    }
+
+    [Fact]
+    public async Task Starting_logo_cancels_the_splash_idle_timer()
+    {
+        var machine = new LogoMachine();
+        var browser = new FakeBrowser();
+        browser.Attach(machine);
+        machine.DemoIdleTimeout = TimeSpan.FromMilliseconds(50);
+        await machine.StartAsync();
+
+        machine.HandleKey("F");   // enter Logo
+        Assert.Equal(AppScreen.Listener, machine.ScreenKind);
+
+        await Task.Delay(200);
+        Assert.Equal(AppScreen.Listener, machine.ScreenKind);   // no demo from the old timer
+    }
+
+    /// <summary>Open settings and move the highlight to the row with this label.</summary>
+    private static void GoToSettingRow(LogoMachine machine, string label)
+    {
+        machine.HandleKey("A-COMMA");
+        for (int i = 0; i <= 24; i++)
+        {
+            if (HighlightedSettingsRow(machine).Contains(label)) return;
+            machine.HandleKey("DOWN");
+        }
+        Assert.Fail($"settings has no row called {label}");
+    }
+
+    /// <summary>The settings row the highlight is on, found by its reverse-video cells.</summary>
+    private static string HighlightedSettingsRow(LogoMachine machine)
+    {
+        for (int r = 0; r < TextScreen.Rows; r++)
+            if (machine.Screen.Attrs[r, 1].HasFlag(CellAttr.Reverse))
+                return machine.Screen.GetRowText(r);
+        return "";
     }
 }

@@ -24,6 +24,8 @@ public enum AppScreen
     WhatsNew,
     Colors,
     Shapes,
+    Examples,
+    Demo,
 }
 
 /// <summary>
@@ -161,6 +163,9 @@ public sealed class LogoMachine
         PaintedBlock? Block);
 
     private readonly Stack<StashedScreen> _overlays = new();
+
+    /// <summary>The splash's idle clock; cancelled the moment a key starts Logo.</summary>
+    private CancellationTokenSource? _splashIdleCts;
 
     public LogoMachine()
     {
@@ -320,12 +325,42 @@ public sealed class LogoMachine
         ScreenKind = AppScreen.Splash;
         SplashArt.Draw(Screen, CurrentName, StorageAvailable, LogoWhatsNew.IsUnread(Store.WhatsNewVersion));
         RequestRender();
+        StartSplashIdleTimer();
+    }
+
+    /// <summary>
+    /// The splash is an attract screen: left alone it starts the demo so a passing child sees Logo
+    /// doing something. Any key press means "someone is here", which restarts the clock, and a key
+    /// that starts Logo cancels it for good.
+    /// </summary>
+    private void StartSplashIdleTimer()
+    {
+        _splashIdleCts?.Cancel();
+        var cts = new CancellationTokenSource();
+        _splashIdleCts = cts;
+        _ = SplashIdleAsync(cts.Token);
+    }
+
+    private async Task SplashIdleAsync(CancellationToken token)
+    {
+        try { await Task.Delay(DemoIdleTimeout, token); }
+        catch (TaskCanceledException) { return; }
+
+        // Only the splash starts itself: if a key already moved on, this timer is stale.
+        if (!token.IsCancellationRequested && ScreenKind == AppScreen.Splash) StartDemo();
+    }
+
+    /// <summary>Restart the idle clock while still on the splash; no-op once Logo has started.</summary>
+    private void RestartSplashIdle()
+    {
+        if (ScreenKind == AppScreen.Splash) StartSplashIdleTimer();
     }
 
     /// <summary>Leave the splash and start the listener, picking up the session where it was left.</summary>
     public void EnterLogo()
     {
         DiscardOverlay();
+        _splashIdleCts?.Cancel();
 
         ScreenKind = AppScreen.Listener;
         _line.Clear();
@@ -614,7 +649,9 @@ public sealed class LogoMachine
                 // A few keys still work here, so a child who prefers amber or ADVANCED mode can
                 // choose it before starting. Everything else starts Logo: the splash is the one
                 // screen whose whole job is "press a key", so a shortcut it does not advertise had
-                // better not exist.
+                // better not exist. Any press also restarts the idle clock that starts the demo,
+                // because a hand on the keyboard means the attract loop should wait.
+                RestartSplashIdle();
                 if (!SplashKey(token)) EnterLogo();
                 break;
             case AppScreen.Listener: HandleListenerKey(token); break;
@@ -627,6 +664,8 @@ public sealed class LogoMachine
             case AppScreen.WhatsNew: HandleWhatsNewKey(token); break;
             case AppScreen.Colors:
             case AppScreen.Shapes: HandleViewerKey(token); break;
+            case AppScreen.Examples: HandleExamplesKey(token); break;
+            case AppScreen.Demo: HandleDemoKey(token); break;
         }
     }
 
@@ -695,6 +734,7 @@ public sealed class LogoMachine
             case "A-V": ShowColors(); return true;
             case "A-W": ShowShapes(); return true;
             case "A-L": ShowSessions(); return true;
+            case "A-X": ShowExamples(); return true;
             case "A-S": _ = SaveThenSay("SAVED " + TextSessionName); return true;
             // Ctrl+S is the same save. Browsers open their own page-save dialog for it, so the key
             // has to be swallowed and given a meaning rather than left dead.
@@ -865,7 +905,10 @@ public sealed class LogoMachine
         }
         catch (LogoException ex)
         {
-            PrintError(ex);
+            // ESC/A-B during a run is not an error - the child asked to stop. Printing "BREAK"
+            // would confuse them, and in demo mode it leaks onto the stashed screen.
+            if (ex.Code != LogoErrorCode.BreakRequested)
+                PrintError(ex);
         }
         catch (Exception ex)
         {
@@ -1273,6 +1316,8 @@ public sealed class LogoMachine
         Motion,
         Colors,
         Shapes,
+        Examples,
+        Demo,
         WhatsNew,
         About,
     }
@@ -1296,6 +1341,8 @@ public sealed class LogoMachine
         (null, ""),
         (Setting.Colors, "COLOR CHART"),
         (Setting.Shapes, "SHAPE CHART"),
+        (Setting.Examples, "EXAMPLES"),
+        (Setting.Demo, "DEMO MODE"),
         (Setting.WhatsNew, "WHAT'S NEW"),
         (Setting.About, "ABOUT"),
     ];
@@ -1328,6 +1375,8 @@ public sealed class LogoMachine
             Setting.Motion => Engine.InstantDraw ? "ON" : "OFF",
             Setting.Colors => "OPEN",
             Setting.Shapes => "OPEN",
+            Setting.Examples => "OPEN",
+            Setting.Demo => "START",
             Setting.WhatsNew => LogoWhatsNew.IsUnread(Store.WhatsNewVersion) ? "READ IT" : $"SEEN {LogoInfo.Version}",
             _ => LogoInfo.Version,
         };
@@ -1442,6 +1491,11 @@ public sealed class LogoMachine
             case Setting.About: ShowAbout(); return true;
             case Setting.Colors: ShowColors(); return true;
             case Setting.Shapes: ShowShapes(); return true;
+            // Examples and Demo open as overlays on top of whatever is showing - settings here, or
+            // the listener when reached by ALT-X. That is what makes ESC put the child exactly where
+            // they were: back in settings if that is where they came from, at the prompt otherwise.
+            case Setting.Examples: ShowExamples(); return true;
+            case Setting.Demo: StartDemo(); return true;
             case Setting.Motion: return false;      // the operating system owns this one
             case Setting.Speed: Adjust(Setting.Speed, +5); return false;
             default: ToggleCurrent(); return false;
@@ -1731,6 +1785,229 @@ public sealed class LogoMachine
         }
 
         if (token is "ESC" or "W") CloseOverlay();
+    }
+
+    // ---- examples ----------------------------------------------------------------
+
+    /// <summary>Which example the highlight sits on, as an index into <see cref="LogoExamples.All"/>.</summary>
+    private int _examplesIndex;
+
+    public void ShowExamples()
+    {
+        _examplesIndex = 0;
+        OpenOverlay(AppScreen.Examples);
+        PaintExamples();
+        RequestRender();
+    }
+
+    /// <summary>
+    /// The numbered list of pre-loaded programs. Ten rows fit the grid with room for a title and an
+    /// instruction line, so there is no paging - a child who wants example 9 presses 9, not arrows.
+    /// </summary>
+    private void PaintExamples()
+    {
+        Screen.Clear();
+        Screen.DrawBox(0, 0, TextScreen.Rows, TextScreen.Cols, "EXAMPLES", CellAttr.None);
+
+        int row = 3;
+        for (int i = 0; i < LogoExamples.Count && row < TextScreen.Rows - 2; i++)
+        {
+            LogoExamples.Example ex = LogoExamples.All[i];
+            string line = $"{ex.Index}  {ex.Title}";
+            Screen.Put(row, 3, line, i == _examplesIndex ? CellAttr.Reverse : CellAttr.None);
+            row++;
+        }
+
+        // The footer is the whole contract: a number picks and runs at once, ENTER runs whatever is
+        // highlighted, ESC goes back. Saying it here means a child never has to guess which key does what.
+        Screen.PutLine(TextScreen.Rows - 2, Fit("0-9 PICK AND RUN   ENTER RUN   ESC BACK"), CellAttr.Dim);
+    }
+
+    private void HandleExamplesKey(string token)
+    {
+        switch (token)
+        {
+            case "ESC": CloseOverlay(); return;
+            case "UP": _examplesIndex = Math.Max(0, _examplesIndex - 1); PaintExamples(); RequestRender(); return;
+            case "DOWN": _examplesIndex = Math.Min(LogoExamples.Count - 1, _examplesIndex + 1); PaintExamples(); RequestRender(); return;
+            case "ENTER": RunExample(_examplesIndex); return;
+        }
+
+        // A digit both moves the highlight and runs that example at once - one key from list to picture.
+        if (token.Length == 1 && char.IsDigit(token[0]))
+        {
+            int index = token[0] - '0';
+            if (index < LogoExamples.Count) RunExample(index);
+        }
+    }
+
+    /// <summary>Close the list and run the chosen example from the listener, so it behaves exactly as typed.</summary>
+    private void RunExample(int index)
+    {
+        LogoExamples.Example? ex = LogoExamples.ByIndex(index);
+        if (ex is null) return;
+
+        CloseOverlay();
+        _ = RunAsync(ex.Source);
+    }
+
+    // ---- demo mode ----------------------------------------------------------------
+
+    /// <summary>Cancels the running demo's typing and flash loops, and breaks any example mid-run.</summary>
+    private CancellationTokenSource? _demoCts;
+
+    /// <summary>True from StartDemo until StopDemo has closed the overlay - guards a double ESC.</summary>
+    private bool _demoActive;
+
+    /// <summary>The child's workspace as it was when the demo started, restored on exit so an example
+    /// that is broken mid-run cannot leave its half-defined procedures in the saved session.</summary>
+    private LogoSession? _demoBefore;
+
+    /// <summary>How long the splash sits before it starts the demo on its own. Short in tests.</summary>
+    public TimeSpan DemoIdleTimeout { get; set; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>The pause between typed characters in the demo. Short in tests.</summary>
+    public int DemoTypeDelayMs { get; set; } = 56;
+
+    /// <summary>The pause after an example finishes, so a child can see what it drew before the next
+    /// one wipes the screen. Short in tests.</summary>
+    public int DemoPauseMs { get; set; } = 3000;
+
+    /// <summary>
+    /// Start the attract loop: each example is typed out character by character, run, and then the
+    /// next one takes over, forever. The screen it covers is stashed like any overlay, so ESC puts
+    /// the child exactly where they were - the splash, or settings if that is where they came from.
+    /// </summary>
+    public void StartDemo()
+    {
+        StopDemo();
+
+        OpenOverlay(AppScreen.Demo);
+        Screen.Clear();
+        _demoActive = true;
+        // The demo runs real programs, and a finished run saves the session. Capturing the child's
+        // workspace first - and restoring it after every example and on exit - is what keeps TRI:
+        // and FLOWER: from leaking into their saved work when they press ESC.
+        _demoBefore = LogoSession.Capture(Engine, CurrentName, "", _history);
+        var cts = new CancellationTokenSource();
+        _demoCts = cts;
+        RequestRender();
+
+        // Two loops share one token: the typing loop and the banner flash. One ESC cancels both,
+        // and breaks an example that is mid-run, so nothing keeps drawing after the demo ends.
+        _ = DemoLoopAsync(cts.Token);
+        _ = FlashBannerAsync(cts.Token);
+    }
+
+    /// <summary>End the demo: stop the loops, break any running example, and restore the screen underneath.</summary>
+    public void StopDemo()
+    {
+        if (!_demoActive) return;
+        _demoActive = false;
+
+        _demoCts?.Cancel();
+        _demoCts = null;
+
+        // ESC can land while an example is running. The break makes RunAsync finish at its next
+        // step, and the overlay closes over whatever it leaves behind - the stashed screen wins.
+        if (IsBusy) RequestBreak();
+
+        // An example may have left the turtle somewhere in the middle of a picture. Put it home so
+        // the child's next command starts from a known place rather than wherever the demo stopped.
+        Engine.TurtleView.Home();
+
+        CloseOverlay();
+
+        // Put the child's workspace back: a broken example may have left half-defined procedures
+        // behind, and RunAsync's closing save would otherwise write them into the session.
+        _demoBefore?.Restore(Engine);
+        _demoBefore = null;
+    }
+
+    private async Task DemoLoopAsync(CancellationToken token)
+    {
+        try
+        {
+            while (!token.IsCancellationRequested)
+            {
+                LogoExamples.Example ex = LogoExamples.All[_demoIndex % LogoExamples.Count];
+                _demoIndex++;
+
+                // A fresh page per example: the turtle goes home, the picture clears, and the grid
+                // resets, so each one starts from a blank screen exactly as it would if typed at the prompt.
+                Engine.TurtleView.Clear();
+                Screen.Clear();
+                RequestRender();
+
+                await TypeExampleAsync(ex.Source, token);
+                if (token.IsCancellationRequested) return;
+
+                await RunAsync(ex.Source);
+                _demoBefore?.Restore(Engine);
+
+                // Let the finished picture sit for a beat before the next example wipes it. The
+                // token makes ESC skip straight to the exit instead of waiting out the pause.
+                if (token.IsCancellationRequested) return;
+                await Task.Delay(DemoPauseMs, token);
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    /// <summary>
+    /// Type the source one character at a time, wrapping across rows like a real terminal would.
+    /// The demo is not the listener, so it draws straight to the grid - PaintInput would refuse
+    /// to draw outside the listener screen.
+    /// </summary>
+    private async Task TypeExampleAsync(string source, CancellationToken token)
+    {
+        int row = Math.Max(1, Screen.WindowTop + 1);
+        int col = 0;
+        for (int i = 0; i < source.Length; i++)
+        {
+            if (token.IsCancellationRequested) return;
+
+            // Wrap to the next row when we reach the right edge.
+            if (col >= TextScreen.Cols)
+            {
+                col = 0;
+                row++;
+                if (row > Screen.WindowBottom) row = Math.Max(1, Screen.WindowTop + 1);
+            }
+
+            Screen.Put(row, col, source[i].ToString(), CellAttr.None);
+            col++;
+            RequestRender();
+            await Task.Delay(DemoTypeDelayMs, token);
+        }
+
+        // A beat between "finished typing" and the picture appearing is what sells that Logo read it.
+        await Task.Delay(Math.Max(200, DemoTypeDelayMs * 4), token);
+    }
+
+    /// <summary>Flash the banner on row 0 - over the drawing area, which is fine while it lasts.</summary>
+    private async Task FlashBannerAsync(CancellationToken token)
+    {
+        bool shown = false;
+        try
+        {
+            while (!token.IsCancellationRequested)
+            {
+                Screen.PutCentered(0, "DEMO MODE - ESC TO EXIT", shown ? CellAttr.None : CellAttr.Reverse);
+                RequestRender();
+                shown = !shown;
+                await Task.Delay(500, token);
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private int _demoIndex;
+
+    /// <summary>Only ESC does anything in the demo: everything else is part of the show.</summary>
+    private void HandleDemoKey(string token)
+    {
+        if (token == "ESC") StopDemo();
     }
 
     // ---- paging ------------------------------------------------------------------
@@ -2072,6 +2349,12 @@ public sealed class LogoMachine
     /// <summary>Capture the running workspace and write the whole store back to the browser.</summary>
     public async Task SaveAsync()
     {
+        // The demo runs real programs, and RunAsync saves on its way out. Without this guard every
+        // example's procedures (TRI:, FLOWER:) would be written into the child's own session - they'd
+        // open their work later and find a flower they never drew. The in-memory engine is restored
+        // separately; this stops the saved file from ever seeing the demo's state.
+        if (_demoActive) return;
+
         // In the editor this saves the file the editor was opened for, which after ALT-L -> N is not
         // the session on screen. The alternative is a program typed in one file landing in another.
         string name = TextSessionName;
