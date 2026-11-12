@@ -5,6 +5,7 @@
 1. **NEVER tell the user you're done if the code doesn't compile.** Always run `dotnet build` and verify 0 errors before reporting completion. If you can't build, you're not done.
 2. **Perform an adversarial review after any non-trivial change.** Try to break your own changes by considering edge cases, error paths, race conditions, null references, off-by-one errors, and assumptions that might break. Challenge your own solution before declaring work complete.
 3. **Run the full test suite** (`dotnet test`) after any non-trivial change to ensure nothing broke.
+4. **Increase the build number after any non-trivial change.** The build number is `git rev-list --count HEAD` (see Build Number below), so committing a non-trivial change bumps it automatically — commit such changes rather than leaving them uncommitted, and verify the new number shows on the splash before reporting completion.
 
 ## Architecture Overview
 
