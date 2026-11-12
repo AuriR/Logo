@@ -1314,6 +1314,7 @@ public sealed class LogoMachine
         Speed,
         Sound,
         Motion,
+        Help,
         Colors,
         Shapes,
         Examples,
@@ -1339,6 +1340,7 @@ public sealed class LogoMachine
         (Setting.Sound, "SOUND"),
         (Setting.Motion, "REDUCED MOTION"),
         (null, ""),
+        (Setting.Help, "HELP"),
         (Setting.Colors, "COLOR CHART"),
         (Setting.Shapes, "SHAPE CHART"),
         (Setting.Examples, "EXAMPLES"),
@@ -1373,6 +1375,7 @@ public sealed class LogoMachine
             Setting.Speed => Engine.InstantDraw ? "INSTANT" : $"{Engine.Speed} {SpeedBar(Engine.Speed)}",
             Setting.Sound => Engine.SoundEnabled ? "ON" : "OFF",
             Setting.Motion => Engine.InstantDraw ? "ON" : "OFF",
+            Setting.Help => "OPEN",
             Setting.Colors => "OPEN",
             Setting.Shapes => "OPEN",
             Setting.Examples => "OPEN",
@@ -1400,7 +1403,7 @@ public sealed class LogoMachine
                        selected ? CellAttr.Reverse : CellAttr.None);
         }
 
-        int footer = boxTop + boxHeight + 2;
+        int footer = boxTop + boxHeight + 1;
         Screen.Put(footer, 2, " UP DOWN CHOOSE", CellAttr.Dim);
         Screen.Put(footer + 1, 2, " LEFT RIGHT CHANGE", CellAttr.Dim);
         Screen.Put(footer + 2, 2, " ENTER OPEN OR TOGGLE", CellAttr.Dim);
@@ -1487,6 +1490,7 @@ public sealed class LogoMachine
     {
         switch (CurrentSetting())
         {
+            case Setting.Help: ShowHelp(); return true;
             case Setting.WhatsNew: ShowWhatsNew(); return true;
             case Setting.About: ShowAbout(); return true;
             case Setting.Colors: ShowColors(); return true;

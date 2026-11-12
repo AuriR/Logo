@@ -526,15 +526,21 @@ public class ReleaseOneOneTests
         Assert.Contains("MODE", text, StringComparison.Ordinal);
         Assert.Contains("SPEED", text, StringComparison.Ordinal);
         Assert.Contains("REDUCED MOTION", text, StringComparison.Ordinal);
+        Assert.Contains("HELP", text, StringComparison.Ordinal);
         Assert.Contains("WHAT'S NEW", text, StringComparison.Ordinal);
         Assert.Contains("ABOUT", text, StringComparison.Ordinal);
         Assert.Contains("ESC BACK", text, StringComparison.Ordinal);
 
         // The box's borders must survive: a full-width row would have painted straight over them.
+        // The bottom edge is found by its corner rather than counted, so the test survives a new row.
+        int bottom = 1;
+        while (machine.Screen.Chars[bottom, 0] != '╚') bottom++;
+
         Assert.Equal('╔', machine.Screen.Chars[1, 0]);
         Assert.Equal('╗', machine.Screen.Chars[1, TextScreen.Cols - 1]);
         Assert.Equal('║', machine.Screen.Chars[8, 0]);
         Assert.Equal('║', machine.Screen.Chars[8, TextScreen.Cols - 1]);
+        Assert.Equal('╝', machine.Screen.Chars[bottom, TextScreen.Cols - 1]);
 
         // Past the box's title, the top rule is still there - a full-width PutLine would have
         // eaten it, which is how a framed page used to lose its right edge.
@@ -627,6 +633,20 @@ public class ReleaseOneOneTests
 
         machine.HandleKey("ESC");
         Assert.Equal(AppScreen.Listener, machine.ScreenKind);
+    }
+
+    [Fact]
+    public static async Task Settings_opens_help_and_returns_to_settings()
+    {
+        (LogoMachine machine, _) = await MachineHarness.AtListenerAsync();
+        machine.ShowSettings();
+
+        GoToSetting(machine, "HELP");
+        machine.HandleKey("ENTER");
+        Assert.Equal(AppScreen.Help, machine.ScreenKind);
+
+        machine.HandleKey("ESC");
+        Assert.Equal(AppScreen.Settings, machine.ScreenKind);
     }
 
     [Fact]

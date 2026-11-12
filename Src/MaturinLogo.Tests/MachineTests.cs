@@ -549,6 +549,27 @@ public class MachineTests
     }
 
     [Fact]
+    public async Task The_keyboard_shortcuts_lead_the_help_screen()
+    {
+        (LogoMachine machine, _) = await MachineHarness.AtListenerAsync();
+        machine.HandleKey("A-?");
+
+        string text = MachineHarness.ScreenText(machine);
+        int keys = text.IndexOf("KEYS", StringComparison.Ordinal);
+        Assert.True(keys >= 0, "the help screen no longer lists the keys");
+
+        // The key list sits at the top of the page, before any command family.
+        foreach (string title in new[] { "TURTLE", "MATH", "WORDS" })
+        {
+            int family = text.IndexOf(title + " =", StringComparison.Ordinal);
+            Assert.True(family < 0 || keys < family, $"{title} appears above the key list");
+        }
+
+        // And nothing on the first page is cut off by the move.
+        Assert.All(machine.Screen.Snapshot(), row => Assert.True(row.Length <= TextScreen.Cols));
+    }
+
+    [Fact]
     public async Task The_reference_pages_with_the_arrows_and_shows_where_it_is()
     {
         (LogoMachine machine, _) = await MachineHarness.AtListenerAsync();

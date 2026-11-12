@@ -59,6 +59,9 @@ public static class QuickReference
         lines.Add("TYPE HELP NAME FOR A LONGER EXPLANATION.");
         lines.Add("ARROWS SCROLL - ESC CLOSES.");
         lines.Add("");
+        lines.Add(Header("KEYS"));
+        foreach (string row in KeyLines()) lines.Add(row);
+        lines.Add("");
 
         foreach (var (family, title) in FamilyOrder)
         {
@@ -91,9 +94,6 @@ public static class QuickReference
 
         lines.Add("");
         lines.Add(new string('-', Width));
-        lines.Add("KEYS:");
-        foreach (string row in KeyLines()) lines.Add("  " + row);
-        lines.Add("");
         lines.Add(Center(LogoInfo.HomageLines[0]));
         lines.Add(Center(LogoInfo.HomageLines[1]));
 
