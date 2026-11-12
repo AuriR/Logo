@@ -1848,7 +1848,16 @@ public sealed class LogoMachine
         if (ex is null) return;
 
         CloseOverlay();
-        _ = RunAsync(ex.Source);
+
+        // Put the code into the prompt and run it through SubmitLine, so the child sees exactly what
+        // will run - the same line they would get by typing it themselves. Running RunAsync directly
+        // used to skip the listener entirely: no code on screen, just a picture appearing out of nowhere.
+        _line.Clear();
+        _caret = 0;
+        _line.Append(ex.Source);
+        _caret = _line.Length;
+        PaintInput();
+        SubmitLine();
     }
 
     // ---- demo mode ----------------------------------------------------------------
@@ -1858,6 +1867,15 @@ public sealed class LogoMachine
 
     /// <summary>True from StartDemo until StopDemo has closed the overlay - guards a double ESC.</summary>
     private bool _demoActive;
+
+    /// <summary>True while an in-flight run is being awaited before the overlay closes. A second ESC
+    /// during that window must be ignored, or it would close the overlay early and then again when
+    /// the awaited run finishes.</summary>
+    private bool _demoStopping;
+
+    /// <summary>The RunAsync task for the example currently executing in the demo loop, so StopDemo
+    /// can await it before restoring the screen underneath.</summary>
+    private Task? _demoRunTask;
 
     /// <summary>The child's workspace as it was when the demo started, restored on exit so an example
     /// that is broken mid-run cannot leave its half-defined procedures in the saved session.</summary>
@@ -1881,6 +1899,8 @@ public sealed class LogoMachine
     public void StartDemo()
     {
         StopDemo();
+        _demoStopping = false;
+        _demoRunTask = null;
 
         OpenOverlay(AppScreen.Demo);
         Screen.Clear();
@@ -1902,21 +1922,50 @@ public sealed class LogoMachine
     /// <summary>End the demo: stop the loops, break any running example, and restore the screen underneath.</summary>
     public void StopDemo()
     {
-        if (!_demoActive) return;
-        _demoActive = false;
+        // _demoStopping covers the window where an in-flight run is being awaited. The overlay is
+        // already closed by then, so a second ESC here would just re-run the exit cleanup.
+        if (!_demoActive || _demoStopping) return;
 
         _demoCts?.Cancel();
         _demoCts = null;
 
         // ESC can land while an example is running. The break makes RunAsync finish at its next
-        // step, and the overlay closes over whatever it leaves behind - the stashed screen wins.
+        // step so we don't have to wait out the whole program.
         if (IsBusy) RequestBreak();
 
-        // An example may have left the turtle somewhere in the middle of a picture. Put it home so
-        // the child's next command starts from a known place rather than wherever the demo stopped.
-        Engine.TurtleView.Home();
+        Task? runTask = _demoRunTask;
+        _demoRunTask = null;
 
+        // Close the overlay right away: ESC must put the child back where they were immediately,
+        // even mid-run. The screen underneath is restored from its stash, so the run's closing
+        // Prompt/PaintInput land on a normal listener (no-ops there) and SaveAsync writes to it -
+        // harmless, because _demoActive stays true until the run ends, which keeps that save from
+        // persisting demo procedures. The workspace restore below runs after the run finishes so
+        // nothing rewrites half-defined procedures on top of it.
+        Engine.TurtleView.Home();
         CloseOverlay();
+
+        if (runTask is not null && !runTask.IsCompleted)
+        {
+            _demoStopping = true;
+            _ = FinishDemoStopAsync(runTask);
+        }
+        else
+        {
+            FinishDemoStop();
+        }
+    }
+
+    private async Task FinishDemoStopAsync(Task runTask)
+    {
+        try { await runTask; } catch { /* RunAsync handles its own errors */ }
+        FinishDemoStop();
+    }
+
+    private void FinishDemoStop()
+    {
+        _demoActive = false;
+        _demoStopping = false;
 
         // Put the child's workspace back: a broken example may have left half-defined procedures
         // behind, and RunAsync's closing save would otherwise write them into the session.
@@ -1930,11 +1979,19 @@ public sealed class LogoMachine
         {
             while (!token.IsCancellationRequested)
             {
+                // Let the finished picture sit for a beat before wiping it, so a child can see what
+                // was drawn. Skipped on the very first iteration because there is nothing to show yet.
+                if (_demoIndex > 0)
+                    await Task.Delay(DemoPauseMs, token);
+
                 LogoExamples.Example ex = LogoExamples.All[_demoIndex % LogoExamples.Count];
                 _demoIndex++;
 
                 // A fresh page per example: the turtle goes home, the picture clears, and the grid
                 // resets, so each one starts from a blank screen exactly as it would if typed at the prompt.
+                // The canvas follows on its own: after the restore below drops the engine's item count
+                // to zero while _sentItems still holds the last example's strokes, this example's first
+                // stroke sees total < _sentItems and triggers a full replay that wipes the old picture.
                 Engine.TurtleView.Clear();
                 Screen.Clear();
                 RequestRender();
@@ -1942,13 +1999,14 @@ public sealed class LogoMachine
                 await TypeExampleAsync(ex.Source, token);
                 if (token.IsCancellationRequested) return;
 
-                await RunAsync(ex.Source);
-                _demoBefore?.Restore(Engine);
-
-                // Let the finished picture sit for a beat before the next example wipes it. The
-                // token makes ESC skip straight to the exit instead of waiting out the pause.
-                if (token.IsCancellationRequested) return;
-                await Task.Delay(DemoPauseMs, token);
+                var runTask = RunAsync(ex.Source);
+                _demoRunTask = runTask;
+                await runTask;
+                _demoRunTask = null;
+                // Restore only the workspace (procedures/globals), not the picture: a full restore
+                // would clear the scene back to its pre-demo state and erase what was just drawn, so
+                // the pause would show nothing. The child needs to see the finished example.
+                _demoBefore?.RestoreWorkspaceOnly(Engine);
             }
         }
         catch (OperationCanceledException) { }

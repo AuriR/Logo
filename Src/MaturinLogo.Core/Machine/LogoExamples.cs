@@ -49,7 +49,7 @@ public static class LogoExamples
             "CS FOR [I 0 15 1] [SETPC :I FD 40 RT 90]"),
 
         new(9, "DANCING TURTLE",
-            "SETSPEED 60 CLEAN REPEAT 20 [FD 30 RT 90 BK 30 LT 90]"),
+            "SETSPEED 60 CLEAN SETXY 130 -85 REPEAT 20 [FD 8 RT 90 BK 8 LT 90]"),
     ];
 
     /// <summary>How many examples there are - the page and the demo both count on this.</summary>

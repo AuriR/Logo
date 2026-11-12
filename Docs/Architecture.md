@@ -28,6 +28,7 @@ on the `Alt-I` dashboard. The revision history at the bottom of this document tr
 | 16 | [Testing](#16-testing) |
 | 17 | [Known gaps / future](#17-known-gaps--future) |
 | 18 | [Glossary](#18-glossary) |
+| 19 | [Examples and demo mode](#19-examples-and-demo-mode) — the ten pre-loaded programs, `Alt-X`, and the attract loop |
 | — | [Revision history](#revision-history) |
 
 ---
@@ -57,10 +58,11 @@ MaturinLogo (WASM)
         | delegates (Func<...> properties) - the only seam between the two halves
         v
 MaturinLogo.Core
-  Machine/LogoMachine.cs        screens, key routing, listener, overlays, sessions, editor
+  Machine/LogoMachine.cs        screens, key routing, listener, overlays, sessions, editor, demo mode
   Machine/ScreenGrid.cs         TextScreen -> HTML
-  Machine/SplashArt.cs          the start-up screen
+  Machine/SplashArt.cs          the start-up screen (version + build number)
   Machine/LogoWhatsNew.cs       the release notes the splash offers
+  Machine/LogoExamples.cs       the ten pre-loaded programs (Alt-X and the demo loop)
   Machine/ColorChart.cs         the VIEWCOLORS swatch grid
   Interpreter/Engine.cs         the evaluator
   Reader/                       tokenizer and reader
@@ -610,6 +612,7 @@ window to find out what went wrong.
 | `Alt-I` | info dashboard |
 | `Alt-V` | the colour chart: all sixteen pen colours with their numbers |
 | `Alt-W` | the shape chart: all six turtle shapes with their numbers |
+| `Alt-X` | examples: ten pre-loaded programs, pick with 0-9, ENTER runs it (see §19) |
 | `Alt-L` | sessions: new / open / delete |
 | `Alt-S`, `Ctrl-S` | save (`Ctrl-S` is mapped so the browser's own page-save dialog does not open) |
 | `Alt-D` | download `.logo` source |
@@ -889,7 +892,7 @@ primitive dispatch, so they are not callable procedures.
 
 ## 16. Testing
 
-498 tests, all green, plus the three Node harnesses described below. `dotnet build` and `dotnet test`
+525 tests, all green, plus the three Node harnesses described below. `dotnet build` and `dotnet test`
 are clean; `dotnet publish` produces a working offline bundle. **This is the only place the total is
 stated** — a test count cannot verify itself, so repeating it elsewhere just multiplies the staleness.
 
@@ -1082,12 +1085,12 @@ is safe.
 
 ## 17. Known gaps / future
 
-`Docs/Additional Features.md` holds the wish list: localisation, an examples library, a demo mode,
-additional-resource links, and a downloadable exception log. Terrapin-only surfaces (bitmaps,
-controls, ports, arrays, property lists beyond `PUT`/`GET`, multi-turtle `TELL`/`ASK`) are out of
-scope; the primitive table leaves room for them. Settings, About, What's New, `SETSPEED` and the
-16-colour palette landed in 1.1; `TOOT` (the 8-bit sound the example in
-`Docs/8-bit Sound Code Example.htm` describes), `SETSOUND` and `VIEWCOLORS` landed in 1.2. The
+`Docs/Additional Features.md` holds the wish list: localisation, additional-resource links, and a
+downloadable exception log. Terrapin-only surfaces (bitmaps, controls, ports, arrays, property lists
+beyond `PUT`/`GET`, multi-turtle `TELL`/`ASK`) are out of scope; the primitive table leaves room for
+them. Settings, About, What's New, `SETSPEED` and the 16-colour palette landed in 1.1; `TOOT` (the
+8-bit sound the example in `Docs/8-bit Sound Code Example.htm` describes), `SETSOUND` and
+`VIEWCOLORS` landed in 1.2; the examples library (`Alt-X`) and demo mode landed in 1.4 (§19). The
 40-column grid stays: 80 columns would mean re-laying out every painter, and the wrapping added in
 1.1 removed the cut-off text that made 40 look too small.
 
@@ -1147,11 +1150,54 @@ Terms in alphabetical order. Anything a section explains in more depth is linked
 
 ---
 
+## 19. Examples and demo mode
+
+The ten pre-loaded programs in `LogoExamples.cs` are the on-ramp for a child who has never seen
+Logo: `Alt-X` opens a numbered list (0-9), ENTER or a digit runs one, and the code is entered at
+the prompt exactly as if typed — visible in the transcript, run through the normal listener path.
+The demo mode reuses the same ten programs as an attract loop.
+
+**Entry points.** The splash starts the demo after ten quiet seconds (any keypress cancels and
+restarts the timer); settings has a `DEMO` row that does the same on ENTER. Both go through
+`StartDemo()`, which opens the demo as an **overlay**, so ESC restores exactly the screen it covered
+— splash from the splash, settings from settings — with no extra state.
+
+**The loop.** Per example: a pause (so the finished picture is seen before it is wiped), clear the
+grid and turtle view, type the source character by character at row 2 (`TypeExampleAsync` draws
+straight to the grid because `PaintInput` refuses to paint outside the listener), then run it with
+the real `RunAsync` — the same path a child uses, so speed, animation and sound behave identically.
+A flashing reverse-video **"DEMO MODE - ESC TO EXIT"** banner sits centred on row 0; only ESC does
+anything in the demo, everything else is part of the show.
+
+**The picture survives between examples.** After each run the loop calls
+`LogoSession.RestoreWorkspaceOnly`, which restores procedures, globals and layout but **not** the
+turtle or scene — a full `Restore` would clear the scene back to its pre-demo state and the pause
+would show nothing. The canvas follows on its own: the restore drops the engine's item count to zero
+while `_sentItems` still holds the last example's strokes, so the next example's first stroke sees
+`total < _sentItems` in `AppendGraphicsAsync` and triggers a full replay that wipes the old picture.
+
+**ESC mid-run closes synchronously.** `StopDemo` cancels both loops, breaks any running example
+(`RequestBreak`, since ESC can land while an example is drawing), Homes the turtle, and **closes the
+overlay immediately** — ScreenKind flips to Listener on the keystroke even with a run in flight. The
+in-flight task is then awaited before `FinishDemoStop` restores the child's workspace, because a
+broken example may have left half-defined procedures behind. `_demoActive` stays true for that whole
+window: it is what keeps `SaveAsync` (called from `RunAsync`'s tail) from persisting demo
+procedures into the child's session, and it is what blocks a second ESC via `_demoStopping`. The
+regression test asserts ScreenKind is Listener *synchronously* after ESC — making the close async
+breaks it.
+
+**The build number.** `LogoInfo` is partial: the csproj's `ComputeBuildNumber` target writes a
+generated const from `git rev-list --count HEAD` (deterministic per commit, offline; falls back to a
+UTC timestamp for source zips without git). The splash and quick reference print
+`1.4 BUILD 21` via `VersionWithBuild`, so a tester can name the exact build they are looking at.
+
+---
+
 ## Revision history
 
 | Version | Date | Changes |
 |---|---|---|
-| **1.4** | 2026-11-10 | Examples library (Alt-X) with ten pre-loaded programs - drawing, a tune, a function, animation, loops, logic, parameters and variables; pick one with 0-9 and it runs at once. Demo mode types and runs the examples on a loop from the splash screen after ten quiet seconds or from settings, with a flashing "DEMO MODE - ESC TO EXIT" banner and ESC to stop. Site preview image for shared links. |
+| **1.4** | 2026-11-12 | Examples library (Alt-X) with ten pre-loaded programs - drawing, a tune, a function, animation, loops, logic, parameters and variables; pick one with 0-9 and the code is entered at the prompt as if typed, then runs. Demo mode types and runs the examples on a loop from the splash screen after ten quiet seconds or from settings, with a flashing "DEMO MODE - ESC TO EXIT" banner centred on row 0 and ESC to stop; the picture survives between examples (workspace-only restore) and ESC mid-run closes the overlay synchronously before the broken example is awaited (§19). A build number (`BUILD n`, git commit count) prints beside the version on the splash and quick reference so a tester can name the exact build. Site preview image for shared links. |
 | **1.3** | 2026-11-07 | Turtle animation now plays back at the chosen speed instead of appearing all at once when a program finishes. The engine was yielding to the browser only every 3,000 steps (`Engine.StepSlice`), so short programs like `REPEAT 4 [FD 50 RIGHT 90]` never yielded during execution and their graphics flushed as one batch after completion. Every scene-changing turtle primitive now calls `MarkGraphicsDirty()`, which sets a `_pendingGraphics` flag; the engine's step loop flushes pending graphics to the browser immediately (via the new `FlushGraphicsAsync()` host method) while keeping the speed-delayed yield at 3,000-step boundaries for long programs. This makes short programs animate visibly without slowing down long ones like `COUNTDOWN 5000`. The fix required adding `FlushGraphicsAsync()` to the `IEngineHost` interface with implementations in both `NullHost` and `WasmHost`. |
 | **1.2** | 2026-11-07 | Sound and the two picture charts. `TOOT` plays a note — hertz or a note name (`TOOT 440`, `TOOT "A4 0.5`), a square wave on the Web Audio clock following `Docs/8-bit Sound Code Example.htm`, queued rather than awaited so a tune never blocks the interpreter and `ESC` still breaks it. `SETSOUND`/`SOUND` and a `SOUND` row in settings carry the switch, remembered beside the monitor colour. `VIEWCOLORS` (`Alt-V`) draws all sixteen pen colours with the number a child types into `SETPC`, and `VIEWSHAPES` (`Alt-W`) draws all six turtle shapes with the number a child types into `SHAPE` — viewers painted through the existing replay path with a synthetic payload, so neither enters the scene, the session, or the exported `.logo` file, and `_viewerOpen` stands the replay/append/turtle paths down while one is up. The shape chart is painted by `drawTurtle` itself at a larger `lenOverride`, not a second copy of each shape, so it cannot show a shape the turtle cannot wear. `SHAPE`'s help and its error now point at `VIEWSHAPES`, and `Alt-V`/`Alt-W` switch between the two charts rather than closing and reopening. Bare `TRUE`/`FALSE` are now values, which fixes `SETSOUND FALSE` and the `SETCASE FALSE` this document has always told people to type. New section §8 Sound. The browser-pass subsection of §16 was rewritten: the four Playwright scripts it described lived in an ephemeral session folder and are gone, so what is actually in the repository — three Node harnesses under `Tools/BrowserCheck` that drive the real `interop.js` against a fake canvas and a fake `AudioContext` — is what is documented now. 144 commands, regenerated through `Tools/DocGen`; `CommandReferenceTests` finds its sections by title instead of by number so adding one here no longer breaks it. |
 | **1.1** | 2026-11-07 | Bug fixes and the settings pass. `SHAPE 0-5` now reaches the canvas — the engine was setting the shape and `setTurtle` was never sending it. The full 16-colour palette is drawn instead of folding `SETPC 6-15` onto 0-5, with the chromatic fringe kept for the six true hi-res colours. `SETSPEED 25-100` throttles the repaint pause (`Engine.FrameDelayMs`), `PRINT SPEED` reports it, and the operating system's `prefers-reduced-motion` overrides it and stops the CRT crawl. The turtle glides to its next position — position lerps, heading takes the shortest arc, `HT`/`ST` fades — instead of teleporting. Text no longer runs off the grid: one `TextWrap` helper feeds the quick reference, `Alt-I`, the session list and every paged overlay, and reference entries are alphabetised inside each family. Names are validated (`LogoReader.IsValidName`), so `TO SQUARE:` is refused rather than defining a procedure that can never be called. New: `Alt-,` settings screen (monitor, CRT, mode, speed, What's New, About), the About page, the What's New page offered from the splash, and the `SETSPEED`/`SPEED`/`SETTINGS` commands — 139 commands, regenerated through `Tools/DocGen`. |

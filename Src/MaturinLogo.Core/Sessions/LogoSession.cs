@@ -139,6 +139,33 @@ public sealed class LogoSession
         if (LowerLines > 0) engine.ShowLower(LowerLines);
         else engine.ShowFullText();
     }
+
+    /// <summary>
+    /// Restore only the workspace - mode, procedures, globals and layout - leaving the turtle's
+    /// position and the drawn picture exactly where they are. The demo loop uses this between
+    /// examples so a procedure one example defined (TRI:, FLOWER:) does not leak into the next,
+    /// without wiping the picture the child is meant to see during the pause. A full
+    /// <see cref="Restore"/> would clear the scene back to whatever was on screen before the demo
+    /// started - which erases the square the example just drew.
+    /// </summary>
+    public void RestoreWorkspaceOnly(Engine engine)
+    {
+        engine.Mode = Mode;
+        engine.LinesWritten = LinesWritten;
+        engine.Workspace.Clear();
+
+        foreach (var text in Procedures)
+            engine.DefineProcedureFromSource(text);
+
+        foreach (var global in Globals)
+            engine.RestoreGlobal(global.Name, global.Text);
+
+        foreach (var property in Properties)
+            engine.RestoreProperty(property.Name, property.Property, property.Text);
+
+        if (LowerLines > 0) engine.ShowLower(LowerLines);
+        else engine.ShowFullText();
+    }
 }
 
 /// <summary>One stored value as Logo text, paired with the name it was kept under.</summary>

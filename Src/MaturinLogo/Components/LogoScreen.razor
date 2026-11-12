@@ -9,6 +9,10 @@
     <div class="ml-graphics @GraphicsClass" id="ml-graphics">
         <canvas id="ml-canvas"></canvas>
     </div>
+    @if (Model.ScreenKind == AppScreen.Demo)
+    {
+        <div class="ml-demo-banner">DEMO MODE - ESC TO EXIT</div>
+    }
     @((MarkupString)Build())
 </div>
 

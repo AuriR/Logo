@@ -150,6 +150,33 @@ html, body {
     image-rendering: pixelated;
 }
 
+/* ---- the demo banner ----------------------------------------------------- */
+
+/* During demo mode the opaque canvas covers row 0, so the grid's "DEMO MODE" text is hidden. This
+   overlay paints the same message on top of the canvas where a child can actually see it. It sits
+   above the canvas (z-index 1) but below the CRT scanline glass (z-index 5), and blinks with the
+   same hard steps(2) as the cursor so it reads as part of the machine, not a web page. */
+.ml-demo-banner {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1;
+    pointer-events: none;
+    color: var(--fg);
+    text-shadow: 0 0 6px var(--glow), 0 0 1px currentColor;
+    animation: ml-demo-flash 1s steps(2, start) infinite;
+}
+
+@keyframes ml-demo-flash {
+    0%, 49%   { opacity: 1; }
+    50%, 100% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ml-demo-banner { animation: none; }
+}
+
 /* ---- CRT emulation ------------------------------------------------------- */
 
 /* Screen-door and scanline overlay plus rounded glass, toggled by html.crt-on. Colours come from

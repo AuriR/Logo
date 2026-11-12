@@ -20,11 +20,13 @@ MaturinLogo is a .NET 10 Blazor WASM clone of Terrapin Logo / Apple Logo II for 
 | File | Purpose |
 |------|---------|
 | `Src/MaturinLogo.Core/Interpreter/Engine.cs` | Core interpreter: evaluation loop, speed system, primitive invocation |
-| `Src/MaturinLogo.Core/Machine/LogoMachine.cs` | Application state machine: overlays, turtle state, key routing |
+| `Src/MaturinLogo.Core/Machine/LogoMachine.cs` | Application state machine: overlays, turtle state, key routing, demo mode |
+| `Src/MaturinLogo.Core/Machine/LogoExamples.cs` | The 10 pre-loaded examples (Alt-X / demo mode) |
+| `Src/MaturinLogo.Core/Sessions/LogoSession.cs` | Session capture/restore; `RestoreWorkspaceOnly` preserves graphics between demo examples |
 | `Src/MaturinLogo.Core/Primitives/*.cs` | All Logo command implementations (one file per category) |
 | `Src/MaturinLogo/Components/LogoApp.razor` | Main app component, keyboard capture, sound callback |
 | `Src/MaturinLogo/Components/LogoScreen.razor` | 24×40 text grid rendering with cursor visibility logic |
-| `Src/MaturinLogo/wwwroot/js/interop.js` | Browser interop: canvas drawing, tween animation, localStorage |
+| `Src/MaturinLogo/wwwroot/js/interop.js` | Browser interop: canvas drawing, tween animation, localStorage, Web Audio |
 
 ## Known Gotchas & Lessons Learned
 
@@ -33,8 +35,19 @@ MaturinLogo is a .NET 10 Blazor WASM clone of Terrapin Logo / Apple Logo II for 
 - **DocGen tool**: `Tools/DocGen` is intentionally excluded from the solution file so it never appears in published WASM output. Run it manually: `dotnet run --project Tools/DocGen`.
 
 ### Browser Testing
-- **WASM server restart required**: After rebuilding, you must restart `dotnet run` or the browser silently gets the old wasm hash. Verify by checking which `MaturinLogo.Core.<hash>.wasm` is requested in network tab.
+- **WASM server restart required**: After rebuilding, you must restart `dotnet run` or the browser silently gets the old wasm hash. Verify by checking which `MaturinLogo.Core.<hash>.wasm` is requested in network tab. The dev server port comes from `Properties/launchSettings.json` (currently **5171**, not 5270) — check the "Now listening on" line, don't assume a port.
 - **Browser check tools are broken**: Node.js scripts in `Tools/BrowserCheck/*.cjs` have ESM/CommonJS issues (`require()` not defined). Use `dotnet run` and manual browser testing instead.
+
+### Build Number
+- `MaturinLogo.Core.csproj` has a `ComputeBuildNumber` MSBuild target that writes `obj/.../LogoInfo.BuildNumber.g.cs` with `const int BuildNumber = <git rev-list --count HEAD>` (fallback: UTC timestamp for non-git source zips). The splash and quick reference show `"1.4 BUILD 21"` via `LogoInfo.VersionWithBuild`. **MSBuild gotcha:** the `Lines` attribute of `WriteLinesToFile` treats `;` as an item separator, so C# semicolons in generated code must be escaped as `%3B`.
+- Tests assert `Assert.Contains(LogoInfo.Version, ...)` — "1.4" must remain a substring of whatever the splash prints. The "WHAT'S NEW IN 1.4" offer intentionally uses plain `LogoInfo.Version`, not `VersionWithBuild`.
+
+### Demo Mode & Examples (v1.4)
+- **Web Audio one-shot rule**: `osc.start()` and `osc.stop()` may each be called only ONCE per oscillator node; a second call throws `InvalidStateError`. The sound path swallows exceptions, so the symptom is *silence*, not an error. Never schedule start/stop twice in interop.js.
+- **Canvas sync invariant**: `_sentItems` tracks how many scene items were sent to the canvas. When the engine's item count drops below `_sentItems` (e.g., after `CLEAN`), `AppendGraphicsAsync` automatically triggers a full replay that wipes the old picture. This is why demo mode does NOT need an explicit clear call — and why calling one is redundant.
+- **Demo exit must close synchronously**: `StopDemo` closes the overlay immediately (ScreenKind flips to Listener on ESC) even when an example is mid-run, then awaits the in-flight run before restoring the workspace. `_demoActive` stays true during that window so `SaveAsync`'s guard prevents demo procedures (TRI:, FLOWER:) from persisting into the child's session. A second ESC is blocked by `_demoStopping`. The regression test `Picking_an_example_right_after_exiting_the_demo_still_runs_it` asserts ScreenKind==Listener *synchronously* after ESC — do not make overlay close async.
+- **Demo uses `RestoreWorkspaceOnly`, not full `Restore`**: a full restore clears the scene and erases what was just drawn, so the 3-second pause would show nothing. Workspace-only restores procedures/globals/layout but leaves turtle+scene intact.
+- **Examples run as if typed**: `RunExample` puts the source into `_line`, calls `PaintInput()` + `SubmitLine()`, so the code is visible in the transcript and runs through the normal path — never fire-and-forget `RunAsync` from an overlay.
 
 ### Logo Language Semantics
 - **Speed system**: `Engine.Speed` ranges 25–100 (default 50). Formula: `FrameDelayMs(speed) = speed >= 100 ? 0 : (100 - speed) * 6`. Tween duration = `clamp(FrameDelayMs / 2, 0, 240)`. At speed 50 → ~150ms tween per frame.

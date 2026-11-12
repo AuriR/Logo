@@ -1020,6 +1020,47 @@ public class MachineTests
     }
 
     [Fact]
+    public async Task Picking_an_example_right_after_exiting_the_demo_still_runs_it()
+    {
+        // The regression this guards: before StopDemo awaited an in-flight run, ESC closed the demo
+        // overlay while RunAsync was still busy. A child who then opened Examples and pressed a digit
+        // hit RunExample -> RunAsync's "if (IsBusy) return;" guard, so nothing ran - exactly the
+        // "pick and run does nothing" report. The fix keeps the overlay up until the run finishes, so
+        // by the time Examples is reachable IsBusy is false and the pick runs for real.
+        (LogoMachine machine, _) = await MachineHarness.AtListenerAsync();
+        machine.DemoTypeDelayMs = 1;
+        machine.DemoPauseMs = 1;
+
+        machine.StartDemo();
+
+        // Land ESC while an example is actually running - that is the case the old code got wrong:
+        // it closed the overlay synchronously even though a run was still in flight, so IsBusy was
+        // true when the child reached Examples and their pick silently no-opped. IsBusy flips to
+        // true at the top of RunAsync, so polling for it is a deterministic "mid-run" marker.
+        for (int i = 0; i < 1000 && !machine.IsBusy; i++)
+            await Task.Delay(5);
+        Assert.True(machine.IsBusy, "the demo should be running an example when we press ESC");
+
+        machine.HandleKey("ESC");
+
+        // The overlay must be gone and the machine idle before the child can act on Examples. This
+        // is the crux of the regression: if a demo run were still in flight when the listener came
+        // back, IsBusy would be true and the pick below would silently no-op.
+        Assert.Equal(AppScreen.Listener, machine.ScreenKind);
+        await MachineHarness.SettleAsync(machine);
+        Assert.False(machine.IsBusy, "the demo's run must have finished before the listener is usable");
+
+        machine.HandleKey("A-X");
+        Assert.Equal(AppScreen.Examples, machine.ScreenKind);
+        machine.HandleKey("0");   // SQUARE: CLEAN REPEAT 4 [FD 50 RT 90]
+
+        Assert.Equal(AppScreen.Listener, machine.ScreenKind);
+        await MachineHarness.SettleAsync(machine);
+        Assert.True(machine.Engine.Scene.Items.Count > 0,
+            "picking an example right after the demo must actually draw");
+    }
+
+    [Fact]
     public async Task The_splash_starts_the_demo_after_it_sits_idle()
     {
         var machine = new LogoMachine();

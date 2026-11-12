@@ -53,7 +53,7 @@ public static class QuickReference
         var lines = new List<string>();
 
         lines.Add(Center($"{LogoInfo.Product} QUICK REFERENCE"));
-        lines.Add(Center($"VERSION {LogoInfo.Version} - {table.All.Count} COMMANDS"));
+        lines.Add(Center($"VERSION {LogoInfo.VersionWithBuild} - {table.All.Count} COMMANDS"));
         lines.Add(new string('-', Width));
         lines.Add("TYPE THE NAME OF A COMMAND TO USE IT.");
         lines.Add("TYPE HELP NAME FOR A LONGER EXPLANATION.");

@@ -789,6 +789,8 @@ export function playTone(hertz, seconds) {
     osc.connect(gain);
     gain.connect(ctx.destination);
 
+    // start() and stop() may only be called once each: a second call throws InvalidStateError, which
+    // used to propagate back into Logo and get swallowed by TOOT's catch - so the note never played.
     osc.start(start);
     osc.stop(stop);
 
@@ -804,9 +806,6 @@ export function playTone(hertz, seconds) {
             liveTones.delete(tone);
         },
     };
-
-    osc.start(start);
-    osc.stop(stop);
 
     liveTones.add(tone);
     osc.onended = () => liveTones.delete(tone);

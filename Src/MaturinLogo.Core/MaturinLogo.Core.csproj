@@ -6,4 +6,28 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <!-- Build number: the git commit count, so every build is uniquely identifiable and it grows by
+       one with each commit. Falls back to a UTC timestamp when git is unavailable (a source zip)
+       so the property is never empty. Computed at build time and written into LogoInfo as a const,
+       which is what the splash shows next to the version so you always know which build you test. -->
+  <Target Name="ComputeBuildNumber" BeforeTargets="CoreCompile">
+    <Exec Command="git rev-list --count HEAD" ConsoleToMSBuild="true" IgnoreExitCode="true">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_GitCommitCountRaw" />
+    </Exec>
+    <PropertyGroup>
+      <_GitCommitCount>$([System.Text.RegularExpressions.Regex]::Replace('$(_GitCommitCountRaw)', '\s', ''))</_GitCommitCount>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(_GitCommitCount)' != ''">
+      <BuildNumber>$(_GitCommitCount)</BuildNumber>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(_GitCommitCount)' == ''">
+      <BuildNumber>$([System.DateTime]::UtcNow.ToString('yyyyMMddHHmmss'))</BuildNumber>
+    </PropertyGroup>
+    <!-- Semicolons are MSBuild's item separator, so they must be escaped as %3B in the Lines value. -->
+    <WriteLinesToFile File="$(IntermediateOutputPath)LogoInfo.BuildNumber.g.cs" Overwrite="true" Lines="namespace MaturinLogo.Core.Primitives%3B public static partial class LogoInfo { internal const int BuildNumber = $(BuildNumber)%3B }" />
+    <ItemGroup>
+      <Compile Include="$(IntermediateOutputPath)LogoInfo.BuildNumber.g.cs" />
+    </ItemGroup>
+  </Target>
+
 </Project>

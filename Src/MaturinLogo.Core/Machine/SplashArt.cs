@@ -59,7 +59,12 @@ public static class SplashArt
         screen.Clear();
 
         screen.PutCentered(0, "M A T U R I N   L O G O", CellAttr.Bold);
-        screen.PutCentered(1, LogoInfo.Version, CellAttr.Dim);
+        // The version and the attribution are two rows because together they exceed the 40-column
+        // width of a single row; row 2 is free (the turtle starts at row 3), so both sit under the
+        // banner without disturbing the layout. The build number rides along with the version so you
+        // always know exactly which build you are looking at - no more stale-page confusion.
+        screen.PutCentered(1, LogoInfo.VersionWithBuild, CellAttr.Dim);
+        screen.PutCentered(2, "BY AURI + AI, REPORT ISSUES AT AURI.NET", CellAttr.Dim);
 
         int top = 3;
         for (int i = 0; i < Turtle.Length; i++)

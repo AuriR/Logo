@@ -38,7 +38,8 @@ The items in this file don't need to be implemented - I'm just tracking my ideas
 - Should we support saving the way LOGO did, in addition to creating the default .logo file? Perhaps that would be good, so they could save when they want? What are the save commands?
 - Plan: Add a tutorial mode, accessible from the main screen by pressing T.
 - Add support for pasting from clipboard, up to 512 characters, would Ctrl-V work?
-- Add "C" for credits from home screen, and it draws, centered, in random colors, with strokes around 20 units in length each, at 75% speed, after clearing the screen: "Maturin\nLogo\nby\nAuri\nRahimzadeh" and then prints to the console: "Web: auri.net Twitter: @Auri - Follow me on LinkedIn\nCode MIT Licensed at: https://github.com/AuriR/Logo" (note the \n are newlines), and then drops the user at the normal programming prompt, then sets the speed to what it was before; Credits also accessible from Settings menu.
+- Add "C" for credits from home screen, and it draws, centered, in random colors, with strokes around 20 units in length each, at 75% speed, after clearing the screen: "Maturin\nLogo\nby\nAuri" and then prints to the console: "Web: auri.net Twitter: @Auri - Follow me on LinkedIn\nCode MIT Licensed at: https://github.com/AuriR/Logo" (note the \n are newlines), and then drops the user at the normal programming prompt, then sets the speed to what it was before; Credits also accessible from Settings menu.
+- Move keyboard shortcuts to top of Help screen
 
 ## Status of the bug list above — shipped in 1.1
 

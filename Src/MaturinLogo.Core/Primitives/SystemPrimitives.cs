@@ -94,7 +94,7 @@ public static class SystemPrimitives
 }
 
 /// <summary>Names and version shown on the splash, the Alt-I dashboard and the quick reference.</summary>
-public static class LogoInfo
+public static partial class LogoInfo
 {
     public const int Major = 1;
     public const int Minor = 4;
@@ -104,6 +104,17 @@ public static class LogoInfo
     public static string Version => $"{Major}.{Minor}";
 
     public static string VersionText => $"{Product} {Version}";
+
+    /// <summary>
+    /// The build number, computed at build time (the git commit count) by the Core project's
+    /// ComputeBuildNumber target and written into this class as a const. Shown next to the version
+    /// on the splash so you always know exactly which build you are looking at - no more guessing
+    /// whether a page is stale.
+    /// </summary>
+    public static string Build => $"BUILD {BuildNumber}";
+
+    /// <summary>Version plus build number, e.g. "1.4 BUILD 21" - the splash's version row.</summary>
+    public static string VersionWithBuild => $"{Version} {Build}";
 
     /// <summary>
     /// The homage line requested on the splash screen. Long, so anything drawn on the 40-column
